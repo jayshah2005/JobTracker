@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Tracker — Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <h1>Job Tracker Settings</h1>
+      <p>Sign in with Google, then paste spreadsheet links you can edit.</p>
+    </header>
+
+    <div class="page-content">
+      <div id="status" class="status hidden"></div>
+
+      <div id="undo-bar" class="undo-bar hidden">
+        <div>
+          <strong>Undo available</strong>
+          <span id="undo-label" class="undo-label"></span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="undo-btn">Undo</button>
+      </div>
+
+      <div class="help-box">
+        <strong>How it works</strong>
+        <ol>
+          <li>First time: open Set up Google, follow the steps, then sign in once.</li>
+          <li>Paste links to any spreadsheets that account can already edit.</li>
+          <li>Edit columns if you want. Destructive edits warn you first and can be undone.</li>
+          <li>Visit a job posting and click the extension icon to save.</li>
+          <li>If sign-in fails, reopen Set up Google and use Common problems and fixes.</li>
+        </ol>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Google account</div>
+        <div class="card">
+          <div id="google-signed-out">
+            <p class="setup-lead">Sign in once. That account is used for every spreadsheet.</p>
+            <div class="actions-row">
+              <button class="btn btn-primary btn-sm" id="sign-in-btn" type="button">Sign in with Google</button>
+              <button class="btn btn-secondary btn-sm" id="open-connect-btn" type="button">Set up Google</button>
+            </div>
+          </div>
+          <div id="google-signed-in" class="hidden">
+            <p class="setup-lead">
+              <strong>Connected.</strong> This Google account is used for every spreadsheet you add.
+            </p>
+            <div class="actions-row">
+              <button class="btn btn-secondary btn-sm" id="sign-out-btn" type="button">Sign out</button>
+              <button class="btn btn-secondary btn-sm" id="open-connect-btn-in" type="button">Set up Google</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Spreadsheets</div>
+        <div class="add-sheet-form">
+          <input
+            type="url"
+            id="sheet-url"
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+          />
+          <button class="btn btn-primary btn-sm" id="add-sheet-btn">Add Sheet</button>
+        </div>
+        <div id="sheet-list" class="sheet-list"></div>
+        <div class="actions-row">
+          <button class="btn btn-secondary btn-sm" id="refresh-btn">Refresh All Sheets</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">General</div>
+        <div class="card settings-grid">
+          <div class="setting-row">
+            <label for="auto-show">Show tracker panel on job pages</label>
+            <input type="checkbox" id="auto-show" checked />
+          </div>
+          <div class="setting-row">
+            <label for="default-status">Default application status</label>
+            <input
+              type="text"
+              id="default-status"
+              value="Applied"
+              style="width: 140px; margin-bottom: 0"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

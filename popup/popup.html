@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Tracker</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Job Tracker</h1>
+      <div class="header-links">
+        <span id="auth-pill" class="auth-pill hidden">Connected</span>
+        <a href="#" id="open-options">Settings</a>
+      </div>
+    </header>
+
+    <main class="main">
+      <div id="status" class="status hidden"></div>
+
+      <div id="signin-view" class="hidden">
+        <div class="empty-state card">
+          <p id="signin-copy">Sign in with Google once. That account is used for every spreadsheet you add.</p>
+          <button class="btn btn-primary" id="sign-in-btn">Sign in with Google</button>
+          <button class="btn btn-secondary" id="open-connect-btn">Set up Google</button>
+          <p id="signin-help" class="signin-help">
+            First time? Open <a href="#" id="open-connect-help">Set up Google</a> and follow the steps.
+            If sign-in fails, that same page has common problems and fixes.
+          </p>
+        </div>
+      </div>
+
+      <div id="setup-view" class="hidden">
+        <div class="empty-state card">
+          <p>Google is connected. Paste any sheet this account can edit.</p>
+          <input
+            type="url"
+            id="setup-sheet-url"
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+          />
+          <button class="btn btn-primary" id="add-sheet-btn">Add Sheet</button>
+        </div>
+      </div>
+
+      <div id="applied-view" class="hidden">
+        <div class="applied-card">
+          <div class="applied-badge">Already applied</div>
+          <p id="applied-summary" class="applied-summary"></p>
+          <p id="applied-meta" class="field-hint"></p>
+        </div>
+      </div>
+
+      <div id="save-view" class="hidden">
+        <div id="destination-section" class="section hidden">
+          <label for="destination-picker">Save to</label>
+          <select id="destination-picker"></select>
+        </div>
+
+        <div class="section">
+          <div class="card preview-grid" id="preview-grid"></div>
+        </div>
+
+        <div class="section" id="fields-section">
+          <div id="dynamic-fields"></div>
+        </div>
+
+        <div class="footer">
+          <button class="btn btn-primary" id="save-btn">Save</button>
+        </div>
+      </div>
+
+      <div id="loading-view">
+        <div class="empty-state">
+          <p>Loading…</p>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

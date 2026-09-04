@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Connect Google — Job Tracker</title>
+    <link rel="stylesheet" href="connect.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <p class="brand">Job Tracker</p>
+      <h1>First-time Google setup</h1>
+      <p class="lede">
+        Anyone can do this once in about five minutes. You never need to open code
+        or edit project files. Keep this tab open while you work through the steps.
+      </p>
+    </header>
+
+    <main class="wrap">
+      <div id="status" class="status hidden" role="status"></div>
+
+      <section class="intro">
+        <p>
+          Job Tracker saves applications to <strong>your</strong> Google Sheets.
+          Google asks you to create a small login key so the extension can update those sheets
+          with your permission. After setup, you sign in once and reuse that account for every spreadsheet.
+        </p>
+      </section>
+
+      <ol class="steps">
+        <li class="step">
+          <h2>Enable the Sheets API</h2>
+          <p>This lets your Google Cloud project talk to Google Sheets.</p>
+          <a
+            class="btn btn-secondary"
+            href="https://console.cloud.google.com/apis/library/sheets.googleapis.com"
+            target="_blank"
+            rel="noopener"
+          >Open Google Sheets API</a>
+          <ol class="how">
+            <li>Sign in with the Google account that will own your job tracker spreadsheet (and can edit it).</li>
+            <li>If Google asks you to create or choose a project, create one and name it something clear, like Job Tracker.</li>
+            <li>On the Google Sheets API page, click <strong>Enable</strong>.</li>
+            <li>When it finishes, return to this tab and continue.</li>
+          </ol>
+        </li>
+
+        <li class="step">
+          <h2>Choose who can sign in</h2>
+          <p>
+            Google needs a short “who is allowed” setup before it will create a login key.
+            For a personal Gmail account, this must be <strong>External</strong>.
+          </p>
+          <a
+            class="btn btn-secondary"
+            href="https://console.cloud.google.com/auth/audience"
+            target="_blank"
+            rel="noopener"
+          >Open Audience settings</a>
+          <ol class="how">
+            <li>Open <strong>Google Auth Platform</strong> → <strong>Audience</strong> (or OAuth consent screen, depending on Google’s layout).</li>
+            <li>
+              Set User type to <strong>External</strong>.
+              Do not choose Internal unless every user is inside the same Google Workspace organisation.
+            </li>
+            <li>Fill in an app name (for example Job Tracker) and your email if Google asks for branding details.</li>
+            <li>
+              While Publishing status is <strong>Testing</strong>, click <strong>Add users</strong> and add the same email
+              you will use to sign in. Save.
+            </li>
+          </ol>
+          <p class="note">
+            External + Testing only allows people on your test-user list. It does not publish the app to the public.
+          </p>
+        </li>
+
+        <li class="step">
+          <h2>Create a Web application client</h2>
+          <p>
+            Create the login key Google calls an OAuth client.
+            Application type must be <strong>Web application</strong> — not Chrome extension or Chrome app.
+          </p>
+          <a
+            class="btn btn-secondary"
+            href="https://console.cloud.google.com/apis/credentials"
+            target="_blank"
+            rel="noopener"
+          >Open Credentials</a>
+          <ol class="how">
+            <li>Click <strong>Create credentials</strong> → <strong>OAuth client ID</strong>.</li>
+            <li>Application type: <strong>Web application</strong>.</li>
+            <li>Name: anything helpful (Job Tracker is fine).</li>
+            <li>
+              Leave <strong>Authorized JavaScript origins</strong> empty.
+              Do not add a URI in that section.
+            </li>
+            <li>
+              Under <strong>Authorized redirect URIs</strong> (the second URI section), click <strong>+ Add URI</strong>.
+            </li>
+            <li>
+              Click <strong>Copy</strong> below, paste into that box, and keep the slash at the end.
+              The link must match exactly.
+            </li>
+            <li>Click <strong>Create</strong>.</li>
+          </ol>
+          <p class="uri-label">Authorized redirect URI (copy this):</p>
+          <div class="uri-row">
+            <code id="redirect-uri"></code>
+            <button type="button" class="btn btn-secondary" id="copy-redirect">Copy</button>
+          </div>
+        </li>
+
+        <li class="step" id="paste-step">
+          <h2>Paste the Client ID and secret here</h2>
+          <p>
+            Google shows two values after Create. Paste them below and save.
+            They stay in this browser only.
+          </p>
+          <ol class="how">
+            <li>Copy <strong>Client ID</strong> — it usually ends with <code>.apps.googleusercontent.com</code>.</li>
+            <li>Copy <strong>Client secret</strong> from the same client. If you closed the dialog, open the client again to find it.</li>
+            <li>Click <strong>Save connection</strong> before signing in.</li>
+          </ol>
+          <label for="oauth-client-id">Client ID</label>
+          <input
+            type="text"
+            id="oauth-client-id"
+            placeholder="….apps.googleusercontent.com"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <label for="oauth-client-secret">Client secret</label>
+          <input
+            type="password"
+            id="oauth-client-secret"
+            placeholder="From the same OAuth client"
+            autocomplete="off"
+          />
+          <button type="button" class="btn btn-primary" id="save-oauth-btn">Save connection</button>
+        </li>
+
+        <li class="step" id="sign-in-panel">
+          <h2>Sign in with Google</h2>
+          <p>
+            Sign in with the account that can edit your spreadsheet and that you added as a test user.
+            You only need to do this once. Then close this tab and open Job Tracker from the toolbar to add a sheet.
+          </p>
+          <div id="signed-out">
+            <button type="button" class="btn btn-primary" id="sign-in-btn">Sign in with Google</button>
+          </div>
+          <div id="signed-in" class="hidden">
+            <p class="connected">Google is connected. Close this tab and open Job Tracker to add a sheet.</p>
+            <button type="button" class="btn btn-secondary" id="sign-out-btn">Sign out</button>
+          </div>
+        </li>
+      </ol>
+
+      <section class="problems" id="problems">
+        <h2>Common problems and fixes</h2>
+        <p class="problems-lede">
+          If something fails, match what you see below. Almost every issue is fixed in Google Cloud settings —
+          not by reinstalling the extension.
+        </p>
+
+        <details class="problem">
+          <summary>Access blocked / “can only be used within its organisation” (403 org_internal)</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> Audience / User type is set to Internal, which blocks personal Google accounts.</p>
+            <p><strong>Fix:</strong></p>
+            <ol>
+              <li>Open <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noopener">Audience</a>.</li>
+              <li>Change User type to <strong>External</strong> (Make external).</li>
+              <li>Add your email as a test user if status is Testing.</li>
+              <li>Wait about a minute, then sign in again. You do not need a new Client ID.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>Error 400 / malformed request / redirect URI mismatch</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> The redirect link in Google does not exactly match the one Job Tracker uses.</p>
+            <p><strong>Fix:</strong></p>
+            <ol>
+              <li>Copy the redirect URI from step 3 on this page.</li>
+              <li>Open your OAuth client in Credentials.</li>
+              <li>
+                Paste it under <strong>Authorized redirect URIs</strong> only — not under Authorized JavaScript origins.
+              </li>
+              <li>Include the trailing slash. Save, wait a minute, then try again.</li>
+              <li>Confirm Application type is <strong>Web application</strong>.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>“This app hasn’t been verified” or Google shows a warning screen</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> New apps in Testing show a warning. That is normal for personal use.</p>
+            <p><strong>Fix:</strong> Click <strong>Advanced</strong>, then continue to Job Tracker (or your app name). You do not need Google verification to use this yourself.</p>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>Sign-in works for someone else but not for you / “access denied”</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> While the app is in Testing, only listed test users can sign in.</p>
+            <p><strong>Fix:</strong> On Audience, add the exact email address you are using, save, then try again.</p>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>Client secret / invalid client / could not exchange code</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> Client ID and Client secret are missing, mistyped, or from different clients.</p>
+            <p><strong>Fix:</strong> Open the same OAuth client in Google Cloud, copy both values again into step 4, click Save connection, then sign in.</p>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>Signed in, but Job Tracker can’t edit the spreadsheet</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> The signed-in Google account is not an editor on that sheet.</p>
+            <p><strong>Fix:</strong> Open the spreadsheet in Google Sheets → Share → give that same account Editor access. Or sign out and sign in with an account that already can edit it.</p>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>Sign-in window closes with no clear message</summary>
+          <div class="problem-body">
+            <p><strong>Cause:</strong> The flow was cancelled, blocked by a Google error page, or the popup was closed early.</p>
+            <p><strong>Fix:</strong> Try sign-in again. If Google showed an error first, use the matching problem above. Confirm steps 2–4 are complete before retrying.</p>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>I already set this up and need to start over</summary>
+          <div class="problem-body">
+            <p><strong>Fix:</strong> You can reuse the same Google Cloud project. Update Audience or the redirect URI if needed, paste a new Client ID/secret here if you created a new client, Save connection, then sign in again.</p>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <script type="module" src="connect.js"></script>
+  </body>
+</html>
