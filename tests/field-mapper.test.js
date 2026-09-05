@@ -21,7 +21,7 @@ describe('guessTagFromHeader', () => {
   test('maps known headers', () => {
     expect(guessTagFromHeader('Company Name')).toBe(FIELD_TAGS.COMPANY_NAME);
     expect(guessTagFromHeader('job title')).toBe(FIELD_TAGS.ROLE);
-    expect(guessTagFromHeader('Status')).toBe(FIELD_TAGS.APPLICATION_STATUS);
+    expect(guessTagFromHeader('Status')).toBe(FIELD_TAGS.CUSTOM_DROPDOWN);
   });
 
   test('maps date applied case-insensitively', () => {
@@ -60,6 +60,11 @@ describe('buildDefaultMappings', () => {
     expect(mappings).toHaveLength(7);
     expect(mappings[0].tag).toBe(FIELD_TAGS.DATE_APPLIED);
     expect(mappings[2].tag).toBe(FIELD_TAGS.COMPANY_NAME);
+    const status = mappings.find((m) => m.header === 'Application Status');
+    expect(status.tag).toBe(FIELD_TAGS.CUSTOM_DROPDOWN);
+    expect(status.dropdownOptions).toEqual(
+      expect.arrayContaining(['Applied', 'Interviewing', 'Offer'])
+    );
   });
 });
 

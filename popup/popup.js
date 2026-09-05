@@ -270,6 +270,7 @@ function renderField(field) {
   if (field.type === 'dropdown') {
     const options = normalizeDropdownOptions(field.options);
     const optionsEncoded = encodeURIComponent(JSON.stringify(options));
+    const suggested = field.suggestedValue || '';
     const hint = field.hint
       ? `<p class="field-hint">${escapeHtml(field.hint)}</p>`
       : '';
@@ -280,10 +281,13 @@ function renderField(field) {
           data-combo
           data-col="${field.columnIndex}"
           data-tag="${field.tag}"
-          data-options="${optionsEncoded}">
+          data-options="${optionsEncoded}"
+          data-suggested="${escapeHtml(suggested)}">
           <div class="combo-control">
             <input type="text" id="${id}" class="combo-input"
               data-field data-tag="${field.tag}" data-col="${field.columnIndex}" data-type="dropdown"
+              data-committed="${escapeHtml(suggested)}"
+              value="${escapeHtml(suggested)}"
               placeholder="Search or add…"
               autocomplete="off"
               spellcheck="false"
@@ -346,9 +350,20 @@ function bindComboboxes(container) {
     if (!input || !menu) return;
 
     let options = parseComboOptions(root);
-    let committed = '';
+    let committed = String(
+      input.dataset.committed || root.dataset.suggested || ''
+    ).trim();
     let open = false;
     let suppressBlur = false;
+
+    if (committed) {
+      setUserInputForField(
+        input.dataset.tag,
+        input.dataset.col,
+        'dropdown',
+        committed
+      );
+    }
 
     const setCommitted = (value) => {
       committed = String(value || '').trim();
