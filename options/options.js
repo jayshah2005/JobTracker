@@ -23,6 +23,7 @@ async function init() {
   $('#refresh-btn').addEventListener('click', handleRefresh);
   $('#undo-btn').addEventListener('click', () => handleUndo());
   $('#auto-show').addEventListener('change', saveSettingsFromUI);
+  $('#embed-role-link').addEventListener('change', saveSettingsFromUI);
   $('#default-status').addEventListener('change', saveSettingsFromUI);
   $('#sign-in-btn').addEventListener('click', handleSignIn);
   $('#sign-out-btn').addEventListener('click', handleSignOut);
@@ -145,6 +146,7 @@ async function loadSettings() {
   const data = await chrome.storage.local.get('settings');
   settings = data.settings || {};
   $('#auto-show').checked = settings.autoShowPopup !== false;
+  $('#embed-role-link').checked = settings.embedRoleHyperlink !== false;
   $('#default-status').value = settings.defaultApplicationStatus || 'Applied';
 }
 
@@ -157,6 +159,7 @@ async function loadUndoStack() {
 async function saveSettingsFromUI() {
   settings = {
     autoShowPopup: $('#auto-show').checked,
+    embedRoleHyperlink: $('#embed-role-link').checked,
     defaultApplicationStatus: $('#default-status').value || 'Applied',
   };
   await chrome.storage.local.set({ settings });

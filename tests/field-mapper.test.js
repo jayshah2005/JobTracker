@@ -12,6 +12,8 @@ import {
   normalizeDropdownOptions,
   mergeDropdownOptions,
   buildColumnUniques,
+  buildHyperlinkFormula,
+  hyperlinkLabel,
 } from '../lib/field-mapper.js';
 import { FIELD_TAGS } from '../lib/constants.js';
 
@@ -117,7 +119,9 @@ describe('buildRowFromMappings', () => {
     );
     expect(row[1]).toBe('998877');
     expect(row[2]).toBe('Google');
-    expect(row[3]).toBe('SWE');
+    expect(row[3]).toBe(
+      '=HYPERLINK("https://careers.google.com/jobs/results/998877","SWE")'
+    );
     expect(row[4]).toBe('https://careers.google.com/jobs/results/998877');
     expect(row[5]).toBe('Mountain View');
     expect(row[6]).toBe('Applied');
@@ -145,7 +149,47 @@ describe('buildRowFromMappings', () => {
       { company_name: 'Manual Co', role: 'Manual Role' }
     );
     expect(row[2]).toBe('Manual Co');
+    // No URL available → plain role text
     expect(row[3]).toBe('Manual Role');
+  });
+
+  test('role embeds posting URL as a Sheets hyperlink', () => {
+    const row = buildRowFromMappings(
+      mappings,
+      rows,
+      {
+        company: 'Acme',
+        role: 'Backend Engineer',
+        url: 'https://jobs.example.com/posting/99',
+      },
+      {}
+    );
+    expect(row[3]).toBe(
+      '=HYPERLINK("https://jobs.example.com/posting/99","Backend Engineer")'
+    );
+  });
+
+  test('role stays plain text when embedRoleHyperlink is off', () => {
+    const row = buildRowFromMappings(
+      mappings,
+      rows,
+      {
+        company: 'Acme',
+        role: 'Backend Engineer',
+        url: 'https://jobs.example.com/posting/99',
+      },
+      { embedRoleHyperlink: false }
+    );
+    expect(row[3]).toBe('Backend Engineer');
+  });
+
+  test('buildHyperlinkFormula escapes quotes', () => {
+    expect(buildHyperlinkFormula('https://x.com', 'Eng "II"')).toBe(
+      '=HYPERLINK("https://x.com","Eng ""II""")'
+    );
+    expect(hyperlinkLabel('=HYPERLINK("https://x.com","Eng ""II""")')).toBe(
+      'Eng "II"'
+    );
   });
 
   test('custom dropdown uses user input', () => {
