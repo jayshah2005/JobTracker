@@ -2,6 +2,7 @@ import { FIELD_TAGS } from '../lib/constants.js';
 import {
   getFieldsNeedingInput,
   normalizeDropdownOptions,
+  normalizeDropdownDefault,
 } from '../lib/field-mapper.js';
 import {
   getAllDestinations,
@@ -393,6 +394,12 @@ function bindComboboxes(container) {
             op: SCHEMA_OPS.SET_DROPDOWN_OPTIONS,
             columnIndex: parseInt(input.dataset.col, 10),
             options,
+            defaultValue: normalizeDropdownDefault(
+              options,
+              selectedDestination.mappings?.find(
+                (m) => m.columnIndex === parseInt(input.dataset.col, 10)
+              )?.dropdownDefault
+            ),
           },
           confirmed: true,
         });
@@ -616,7 +623,13 @@ function updateDestinationDropdownOptions(columnIndex, options) {
   const mapping = selectedDestination.mappings.find(
     (m) => m.columnIndex === columnIndex
   );
-  if (mapping) mapping.dropdownOptions = [...options];
+  if (mapping) {
+    mapping.dropdownOptions = [...options];
+    mapping.dropdownDefault = normalizeDropdownDefault(
+      options,
+      mapping.dropdownDefault
+    );
+  }
 }
 
 function getAutoValue(tag, data, sett) {

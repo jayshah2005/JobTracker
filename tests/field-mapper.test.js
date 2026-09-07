@@ -65,6 +65,7 @@ describe('buildDefaultMappings', () => {
     expect(status.dropdownOptions).toEqual(
       expect.arrayContaining(['Applied', 'Interviewing', 'Offer'])
     );
+    expect(status.dropdownDefault).toBe('Applied');
   });
 });
 
@@ -199,10 +200,32 @@ describe('buildRowFromMappings', () => {
 
   test('custom dropdown uses user input', () => {
     const customMappings = [
-      { columnIndex: 0, header: 'Source', tag: FIELD_TAGS.CUSTOM_DROPDOWN, dropdownOptions: ['LinkedIn', 'Indeed'] },
+      {
+        columnIndex: 0,
+        header: 'Source',
+        tag: FIELD_TAGS.CUSTOM_DROPDOWN,
+        dropdownOptions: ['LinkedIn', 'Indeed'],
+        dropdownDefault: 'Indeed',
+      },
     ];
-    const row = buildRowFromMappings(customMappings, [], {}, { dropdown_0: 'LinkedIn' });
+    const row = buildRowFromMappings(customMappings, [], {}, {
+      dropdown_0: 'LinkedIn',
+    });
     expect(row[0]).toBe('LinkedIn');
+  });
+
+  test('custom dropdown uses configured default when empty', () => {
+    const customMappings = [
+      {
+        columnIndex: 0,
+        header: 'Source',
+        tag: FIELD_TAGS.CUSTOM_DROPDOWN,
+        dropdownOptions: ['LinkedIn', 'Indeed'],
+        dropdownDefault: 'Indeed',
+      },
+    ];
+    const row = buildRowFromMappings(customMappings, [], {}, {});
+    expect(row[0]).toBe('Indeed');
   });
 
   test('custom text uses per-column input keys (not a shared tag)', () => {

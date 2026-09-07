@@ -4,7 +4,7 @@ import {
   DESTRUCTIVE_WARNING,
   isDestructiveOp,
 } from '../lib/schema-editor.js';
-import { normalizeDropdownOptions } from '../lib/field-mapper.js';
+import { normalizeDropdownOptions, normalizeDropdownDefault } from '../lib/field-mapper.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -288,6 +288,10 @@ function renderSheetList() {
     btn.addEventListener('click', onRefreshColumnUniques);
   });
 
+  container.querySelectorAll('[data-dropdown-default]').forEach((select) => {
+    select.addEventListener('change', onDropdownDefaultChange);
+  });
+
   container.querySelectorAll('details.dd-editor').forEach((el) => {
     el.addEventListener('toggle', () => {
       const key = el.dataset.editorKey;
@@ -402,8 +406,26 @@ function renderTabMappings(sheet, tab) {
         )
         .join('');
 
+      const defaultValue = normalizeDropdownDefault(
+        options,
+        m.dropdownDefault
+      );
+      const defaultOptions = [
+        `<option value="">No default</option>`,
+        ...options.map(
+          (opt) =>
+            `<option value="${escapeHtml(opt)}" ${
+              opt === defaultValue ? 'selected' : ''
+            }>${escapeHtml(opt)}</option>`
+        ),
+      ].join('');
+
       const countLabel =
-        options.length === 0 ? 'None yet' : `${options.length}`;
+        options.length === 0
+          ? 'None yet'
+          : defaultValue
+            ? `${options.length} · default ${defaultValue}`
+            : `${options.length}`;
 
       const fromSheetBlock = suggested.length
         ? `<div class="dd-sheet">
@@ -450,6 +472,18 @@ function renderTabMappings(sheet, tab) {
                     : `<p class="dd-empty">Add choices manually, or pull unique values from the sheet.</p>`
                 }
                 ${fromSheetBlock}
+                <div class="dd-default-row">
+                  <label class="dd-default-label" for="dd-default-${sheet.spreadsheetId}-${tab.gid}-${m.columnIndex}">Default value</label>
+                  <select id="dd-default-${sheet.spreadsheetId}-${tab.gid}-${m.columnIndex}"
+                    class="dd-default-select"
+                    data-dropdown-default
+                    data-sheet="${sheet.spreadsheetId}"
+                    data-tab="${tab.gid}"
+                    data-col="${m.columnIndex}"
+                    ${options.length ? '' : 'disabled'}>
+                    ${defaultOptions}
+                  </select>
+                </div>
                 <div class="dd-add">
                   <input type="text" class="dropdown-option-input"
                     placeholder="New choice"
@@ -801,13 +835,39 @@ function getTab(spreadsheetId, tabId) {
   return sheet?.tabs?.find((t) => t.gid === tabId || t.tabId === tabId) || null;
 }
 
-async function saveDropdownOptions(spreadsheetId, tabId, columnIndex, options) {
+async function saveDropdownOptions(
+  spreadsheetId,
+  tabId,
+  columnIndex,
+  options,
+  defaultValue
+) {
   openDropdownEditors.add(dropdownEditorKey(spreadsheetId, tabId, columnIndex));
+  const mapping = getMapping(spreadsheetId, tabId, columnIndex);
+  const nextDefault =
+    defaultValue !== undefined ? defaultValue : mapping?.dropdownDefault || '';
   await applyChange(spreadsheetId, tabId, {
     op: SCHEMA_OPS.SET_DROPDOWN_OPTIONS,
     columnIndex,
     options,
+    defaultValue: normalizeDropdownDefault(options, nextDefault),
   });
+}
+
+async function onDropdownDefaultChange(e) {
+  const select = e.currentTarget;
+  const spreadsheetId = select.dataset.sheet;
+  const tabId = select.dataset.tab;
+  const columnIndex = parseInt(select.dataset.col, 10);
+  const mapping = getMapping(spreadsheetId, tabId, columnIndex);
+  const options = normalizeDropdownOptions(mapping?.dropdownOptions);
+  await saveDropdownOptions(
+    spreadsheetId,
+    tabId,
+    columnIndex,
+    options,
+    select.value
+  );
 }
 
 async function onAddDropdownOption(e) {

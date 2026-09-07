@@ -55,6 +55,32 @@ describe('schema-editor', () => {
     expect(result.syncHeaders).toBe(false);
   });
 
+  test('SET_DROPDOWN_OPTIONS can set a default choice', () => {
+    const result = applySchemaChange(headers, mappings, {
+      op: SCHEMA_OPS.SET_DROPDOWN_OPTIONS,
+      columnIndex: 2,
+      options: ['LinkedIn', 'Indeed', 'Referral'],
+      defaultValue: 'Indeed',
+    });
+    expect(result.mappings[2].dropdownDefault).toBe('Indeed');
+  });
+
+  test('SET_DROPDOWN_OPTIONS clears invalid defaults', () => {
+    const withDropdown = applySchemaChange(headers, mappings, {
+      op: SCHEMA_OPS.SET_DROPDOWN_OPTIONS,
+      columnIndex: 2,
+      options: ['A', 'B'],
+      defaultValue: 'B',
+    });
+    const result = applySchemaChange(headers, withDropdown.mappings, {
+      op: SCHEMA_OPS.SET_DROPDOWN_OPTIONS,
+      columnIndex: 2,
+      options: ['A'],
+      defaultValue: 'B',
+    });
+    expect(result.mappings[2].dropdownDefault).toBe('');
+  });
+
   test('add column appends header and mapping', () => {
     const result = applySchemaChange(headers, mappings, {
       op: SCHEMA_OPS.ADD,
