@@ -66,7 +66,13 @@ function createPanel() {
   `;
 
   document.body.appendChild(panel);
-  panel.querySelector('.jt-close').addEventListener('click', hidePanel);
+  panel.querySelector('.jt-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    hidePanel();
+  });
+  panel.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+  });
 }
 
 async function refreshPanelCopy() {
@@ -94,7 +100,8 @@ async function refreshPanelCopy() {
   }
 
   panel.classList.remove('jt-applied');
-  hint.textContent = 'Click the Job Tracker icon in the toolbar to save this job.';
+  hint.innerHTML =
+    'Open the <strong>Job Tracker</strong> sidebar from the toolbar to review and save this job.';
 }
 
 function showPanel() {

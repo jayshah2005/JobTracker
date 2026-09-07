@@ -64,7 +64,87 @@ import {
   normalizeRedirectUri,
 } from '../lib/google-auth.js';
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const SIDE_PANEL_PATH = 'sidepanel/sidepanel.html';
+
+/** Enable a tab-scoped side panel (call before the user clicks — never await this before open()). */
+function enableSidePanelForTab(tabId, tabUrl) {
+  if (!tabId || !chrome.sidePanel?.setOptions) return Promise.resolve();
+  // Side panel is only useful on normal web pages.
+  if (
+    tabUrl &&
+    !/^https?:/i.test(tabUrl) &&
+    !tabUrl.startsWith('file:')
+  ) {
+    return chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+  }
+  return chrome.sidePanel.setOptions({
+    tabId,
+    path: SIDE_PANEL_PATH,
+    enabled: true,
+  });
+}
+
+function configureSidePanelBehavior() {
+  if (!chrome.sidePanel?.setPanelBehavior) return;
+  // Most reliable: Chrome opens the panel on toolbar click (no user-gesture race).
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((err) => console.warn('sidePanel.setPanelBehavior failed:', err));
+}
+
+configureSidePanelBehavior();
+chrome.runtime.onInstalled.addListener(configureSidePanelBehavior);
+chrome.runtime.onStartup.addListener(configureSidePanelBehavior);
+
+// Pre-enable for each tab so the first toolbar click shows our UI.
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  enableSidePanelForTab(tabId, tab?.url).catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' || changeInfo.url) {
+    enableSidePanelForTab(tabId, tab?.url || changeInfo.url).catch(() => {});
+  }
+});
+
+chrome.tabs.query({}).then((tabs) => {
+  for (const tab of tabs) {
+    if (tab.id != null) enableSidePanelForTab(tab.id, tab.url).catch(() => {});
+  }
+}).catch(() => {});
+
+/**
+ * Open the side panel for a tab. Must call open() synchronously in the gesture
+ * handler — never await setOptions first or Chrome drops the user gesture.
+ */
+function openSidePanelForTab(tab) {
+  if (!tab?.id || !chrome.sidePanel?.open) return;
+  enableSidePanelForTab(tab.id, tab.url).catch(() => {});
+  chrome.sidePanel.open({ tabId: tab.id }).catch((err) => {
+    console.warn('Could not open side panel:', err);
+  });
+}
+
+// Fallback if openPanelOnActionClick is unavailable / disabled.
+chrome.action.onClicked.addListener((tab) => {
+  openSidePanelForTab(tab);
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'OPEN_SIDE_PANEL') {
+    // Keep gesture alive: open immediately using sender tab when possible.
+    const tabId = message.tabId || sender.tab?.id;
+    if (tabId != null) {
+      enableSidePanelForTab(tabId, sender.tab?.url).catch(() => {});
+      chrome.sidePanel.open({ tabId }).catch((err) => {
+        console.warn('Could not open side panel:', err);
+      });
+    }
+    sendResponse({ success: true });
+    return false;
+  }
+
   handleMessage(message).then(sendResponse).catch((err) => {
     sendResponse({ success: false, error: err.message });
   });

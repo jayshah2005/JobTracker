@@ -37,7 +37,7 @@ If you’ve already saved that job, you’ll see **Already applied** and it won�
 | Access denied for your account | Add that exact email under Audience test users. |
 | Client secret / invalid client | Re-copy Client ID and secret from the same OAuth client into Job Tracker and save. |
 | Can’t edit spreadsheet | Sign in with an account that already has Editor access on that sheet. |
-| Autofill missing | Fill the field in the popup — some sites don’t expose job data. |
+| Autofill missing | Fill the field in the sidebar — some sites don’t expose job data. |
 | Panel doesn’t appear | Enable “Show tracker panel” in Settings. |
 
 ## License
