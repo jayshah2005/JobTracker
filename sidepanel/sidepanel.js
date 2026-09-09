@@ -29,8 +29,37 @@ function draftKey(tabId) {
   return `sidepanelDraft:${tabId}`;
 }
 
+function notifyPageSidePanelState(open) {
+  if (!boundTabId) return;
+  chrome.tabs
+    .sendMessage(boundTabId, {
+      type: 'SIDE_PANEL_STATE',
+      open: Boolean(open),
+    })
+    .catch(() => {});
+}
+
+async function collapseSidePanel() {
+  notifyPageSidePanelState(false);
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'CLOSE_SIDE_PANEL',
+      tabId: boundTabId,
+    });
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.close();
+  } catch {
+    /* ignore */
+  }
+}
+
 async function init() {
   boundTabId = await resolveBoundTabId();
+  notifyPageSidePanelState(true);
+  window.addEventListener('pagehide', () => notifyPageSidePanelState(false));
 
   const openSettings = (e) => {
     e.preventDefault();
@@ -38,6 +67,7 @@ async function init() {
   };
   $('#open-options').addEventListener('click', openSettings);
   $('#tab-settings')?.addEventListener('click', openSettings);
+  $('#collapse-panel')?.addEventListener('click', collapseSidePanel);
 
   $('#sign-in-btn').addEventListener('click', handleSignIn);
   $('#open-connect-btn').addEventListener('click', openConnectPage);

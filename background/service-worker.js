@@ -134,6 +134,9 @@ function openSidePanelForTab(tab) {
   if (!tab?.id || !chrome.sidePanel?.open) return;
   if (!isSidePanelableUrl(tab.url)) return;
   enableSidePanelForTab(tab.id).catch(() => {});
+  chrome.tabs
+    .sendMessage(tab.id, { type: 'SIDE_PANEL_STATE', open: true })
+    .catch(() => {});
   chrome.sidePanel.open({ tabId: tab.id }).catch((err) => {
     console.warn('Could not open side panel:', err);
   });
@@ -149,6 +152,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabUrl = sender.tab?.url;
     if (tabId != null && isSidePanelableUrl(tabUrl)) {
       enableSidePanelForTab(tabId).catch(() => {});
+      chrome.tabs
+        .sendMessage(tabId, { type: 'SIDE_PANEL_STATE', open: true })
+        .catch(() => {});
       chrome.sidePanel.open({ tabId }).catch((err) => {
         console.warn('Could not open side panel:', err);
       });
@@ -157,11 +163,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === 'CLOSE_SIDE_PANEL') {
+    const tabId = message.tabId || sender.tab?.id;
+    closeSidePanelForTab(tabId)
+      .then(() => {
+        if (tabId != null) {
+          chrome.tabs
+            .sendMessage(tabId, { type: 'SIDE_PANEL_STATE', open: false })
+            .catch(() => {});
+        }
+        sendResponse({ success: true });
+      })
+      .catch((err) => sendResponse({ success: false, error: err?.message }));
+    return true;
+  }
+
   handleMessage(message).then(sendResponse).catch((err) => {
     sendResponse({ success: false, error: err.message });
   });
   return true;
 });
+
+async function closeSidePanelForTab(tabId) {
+  if (tabId == null) return;
+  if (typeof chrome.sidePanel?.close === 'function') {
+    try {
+      await chrome.sidePanel.close({ tabId });
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  // Older Chrome: briefly disable the tab panel to force it closed, then
+  // leave it disabled until the user opens it again from this tab.
+  sidePanelEnabledTabs.delete(tabId);
+  await chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+}
 
 async function handleMessage(message) {
   switch (message.type) {
