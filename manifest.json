@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Job Tracker",
-  "version": "1.3.0",
+  "version": "1.4.3",
   "description": "Track job applications in Google Sheets with smart autofill from job postings.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApxl4PUG9mmRIPbXRkfcyzb/linZkpFGaDmie5a6z4tApJoXNVT9bRWjZOZJZlI5Qd/cPfMu3Yfm7niGjKSZjoflOsMhAHexrZl8OO2OTIq72RjCR1ePvcBNTDSwy2NUlgoVxKhdN2eKBkm/GwGlGokx6Zazi+b6kCoZCZ0Mun+O64WptW7Pe0VR761vM9TkfTPX/0NUGd93XrCDdtyxauxnRBuYewIwl8kiLiHvBAFLH/pgDX+beGk6hpWlLcvpTlO1SIMIUSjijBxxtSA3y973cY2pNpJwTo3hcfl8A8mP+dW+zap8LwjFBUg78jQEG746ZDaBxVIlPv2TSMOZb6QIDAQAB",
-  "permissions": ["storage", "activeTab", "identity", "scripting"],
+  "permissions": ["storage", "activeTab", "identity", "scripting", "sidePanel", "tabs"],
   "host_permissions": [
     "https://www.googleapis.com/*",
     "https://accounts.google.com/*",
@@ -13,13 +13,12 @@
     "<all_urls>"
   ],
   "action": {
-    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "Job Tracker"
+    "default_title": "Open Job Tracker sidebar"
   },
   "options_ui": {
     "page": "options/options.html",

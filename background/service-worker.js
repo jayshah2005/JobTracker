@@ -64,12 +64,141 @@ import {
   normalizeRedirectUri,
 } from '../lib/google-auth.js';
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const SIDE_PANEL_PATH = 'sidepanel/sidepanel.html';
+
+/** Tabs where the user explicitly opened the sidebar. */
+const sidePanelEnabledTabs = new Set();
+
+function isSidePanelableUrl(url) {
+  if (!url) return true;
+  return /^https?:/i.test(url) || url.startsWith('file:');
+}
+
+/** Global default off — avoids a window-wide panel that follows every tab. */
+function disableGlobalSidePanel() {
+  if (!chrome.sidePanel?.setOptions) return Promise.resolve();
+  return chrome.sidePanel.setOptions({ enabled: false }).catch(() => {});
+}
+
+function enableSidePanelForTab(tabId) {
+  if (!tabId || !chrome.sidePanel?.setOptions) return Promise.resolve();
+  sidePanelEnabledTabs.add(tabId);
+  return chrome.sidePanel.setOptions({
+    tabId,
+    path: SIDE_PANEL_PATH,
+    enabled: true,
+  });
+}
+
+function disableSidePanelForTab(tabId) {
+  if (!tabId || !chrome.sidePanel?.setOptions) return Promise.resolve();
+  sidePanelEnabledTabs.delete(tabId);
+  return chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+}
+
+function configureSidePanelBehavior() {
+  disableGlobalSidePanel();
+  if (!chrome.sidePanel?.setPanelBehavior) return;
+  // Handle the toolbar click ourselves so we can enable only that tab.
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: false })
+    .catch((err) => console.warn('sidePanel.setPanelBehavior failed:', err));
+}
+
+configureSidePanelBehavior();
+chrome.runtime.onInstalled.addListener(configureSidePanelBehavior);
+chrome.runtime.onStartup.addListener(configureSidePanelBehavior);
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  sidePanelEnabledTabs.delete(tabId);
+});
+
+// Keep the panel enabled across in-tab navigations for tabs that opened it.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!sidePanelEnabledTabs.has(tabId)) return;
+  if (!(changeInfo.status === 'complete' || changeInfo.url)) return;
+  const url = tab?.url || changeInfo.url;
+  if (!isSidePanelableUrl(url)) {
+    disableSidePanelForTab(tabId);
+    return;
+  }
+  enableSidePanelForTab(tabId).catch(() => {});
+});
+
+/**
+ * Open the side panel for one tab only. Call open() synchronously in the
+ * gesture handler — never await setOptions first or Chrome drops the gesture.
+ * Other tabs stay disabled, so switching away hides the sidebar.
+ */
+function openSidePanelForTab(tab) {
+  if (!tab?.id || !chrome.sidePanel?.open) return;
+  if (!isSidePanelableUrl(tab.url)) return;
+  enableSidePanelForTab(tab.id).catch(() => {});
+  chrome.tabs
+    .sendMessage(tab.id, { type: 'SIDE_PANEL_STATE', open: true })
+    .catch(() => {});
+  chrome.sidePanel.open({ tabId: tab.id }).catch((err) => {
+    console.warn('Could not open side panel:', err);
+  });
+}
+
+chrome.action.onClicked.addListener((tab) => {
+  openSidePanelForTab(tab);
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'OPEN_SIDE_PANEL') {
+    const tabId = message.tabId || sender.tab?.id;
+    const tabUrl = sender.tab?.url;
+    if (tabId != null && isSidePanelableUrl(tabUrl)) {
+      enableSidePanelForTab(tabId).catch(() => {});
+      chrome.tabs
+        .sendMessage(tabId, { type: 'SIDE_PANEL_STATE', open: true })
+        .catch(() => {});
+      chrome.sidePanel.open({ tabId }).catch((err) => {
+        console.warn('Could not open side panel:', err);
+      });
+    }
+    sendResponse({ success: true });
+    return false;
+  }
+
+  if (message?.type === 'CLOSE_SIDE_PANEL') {
+    const tabId = message.tabId || sender.tab?.id;
+    closeSidePanelForTab(tabId)
+      .then(() => {
+        if (tabId != null) {
+          chrome.tabs
+            .sendMessage(tabId, { type: 'SIDE_PANEL_STATE', open: false })
+            .catch(() => {});
+        }
+        sendResponse({ success: true });
+      })
+      .catch((err) => sendResponse({ success: false, error: err?.message }));
+    return true;
+  }
+
   handleMessage(message).then(sendResponse).catch((err) => {
     sendResponse({ success: false, error: err.message });
   });
   return true;
 });
+
+async function closeSidePanelForTab(tabId) {
+  if (tabId == null) return;
+  if (typeof chrome.sidePanel?.close === 'function') {
+    try {
+      await chrome.sidePanel.close({ tabId });
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  // Older Chrome: briefly disable the tab panel to force it closed, then
+  // leave it disabled until the user opens it again from this tab.
+  sidePanelEnabledTabs.delete(tabId);
+  await chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+}
 
 async function handleMessage(message) {
   switch (message.type) {

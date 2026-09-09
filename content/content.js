@@ -1,12 +1,14 @@
 /**
- * Content script — detects job pages and shows the floating tracker panel.
+ * Content script — detects job pages and shows a Simplify-style launcher.
  * Injected into all frames so iframe-hosted ATS postings are covered.
  */
 
 import { extractJobData, isLikelyJobPage } from '../lib/job-extractor.js';
 
-const PANEL_ID = 'job-tracker-panel';
-let panelVisible = false;
+const LAUNCHER_ID = 'job-tracker-launcher';
+let launcherVisible = false;
+let sidePanelOpen = false;
+let dismissed = false;
 let lateScanTimer = null;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -17,18 +19,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       isJobPage: isLikelyJobPage(window.location.href, document),
     });
   }
-  if (message.type === 'TOGGLE_PANEL') {
-    // Only toggle in the top frame to avoid duplicate panels
+  if (message.type === 'SIDE_PANEL_STATE') {
     if (window === window.top) {
-      togglePanel();
-      sendResponse({ success: true, visible: panelVisible });
+      sidePanelOpen = Boolean(message.open);
+      syncLauncherVisibility();
+    }
+    sendResponse({ success: true });
+  }
+  if (message.type === 'TOGGLE_PANEL') {
+    if (window === window.top) {
+      if (launcherVisible) hideLauncher();
+      else showLauncher();
+      sendResponse({ success: true, visible: launcherVisible });
     } else {
       sendResponse({ success: true, visible: false, skipped: true });
     }
   }
   if (message.type === 'HIDE_PANEL') {
     if (window === window.top) {
-      hidePanel();
+      hideLauncher();
       sendResponse({ success: true });
     } else {
       sendResponse({ success: true, skipped: true });
@@ -46,79 +55,94 @@ function injectStyles() {
   document.head.appendChild(link);
 }
 
-function createPanel() {
+function createLauncher() {
   if (window !== window.top) return;
-  if (document.getElementById(PANEL_ID)) return;
+  if (document.getElementById(LAUNCHER_ID)) return;
 
   injectStyles();
 
-  const panel = document.createElement('div');
-  panel.id = PANEL_ID;
-  panel.className = 'jt-panel jt-hidden';
-  panel.innerHTML = `
-    <div class="jt-panel-header">
-      <span class="jt-panel-title">Job Tracker</span>
-      <button class="jt-btn-icon jt-close" title="Close">×</button>
-    </div>
-    <div class="jt-panel-body">
-      <p class="jt-hint"></p>
-    </div>
+  const root = document.createElement('div');
+  root.id = LAUNCHER_ID;
+  root.className = 'jt-launcher jt-hidden';
+  root.innerHTML = `
+    <button type="button" class="jt-launcher-btn" title="Open Job Tracker" aria-label="Open Job Tracker">
+      <span class="jt-launcher-logo" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M7 4h7l3 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="#fff"/>
+          <path d="M14 4v4h4" stroke="#bfdbfe" stroke-width="1.5"/>
+        </svg>
+      </span>
+      <span class="jt-launcher-label">Job Tracker</span>
+    </button>
+    <button type="button" class="jt-launcher-dismiss" title="Hide" aria-label="Hide Job Tracker button">×</button>
   `;
 
-  document.body.appendChild(panel);
-  panel.querySelector('.jt-close').addEventListener('click', hidePanel);
+  document.documentElement.appendChild(root);
+
+  root.querySelector('.jt-launcher-btn').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+  });
+
+  root.querySelector('.jt-launcher-dismiss').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dismissed = true;
+    hideLauncher();
+  });
 }
 
-async function refreshPanelCopy() {
+function syncLauncherVisibility() {
+  const el = document.getElementById(LAUNCHER_ID);
+  if (!el) return;
+  const shouldShow =
+    launcherVisible && !dismissed && !sidePanelOpen && isLikelyJobPage(location.href, document);
+  el.classList.toggle('jt-hidden', !shouldShow);
+  el.classList.toggle('jt-applied', el.dataset.applied === '1');
+}
+
+async function refreshLauncherState() {
   if (window !== window.top) return;
-  createPanel();
-  const hint = document.querySelector(`#${PANEL_ID} .jt-hint`);
-  const panel = document.getElementById(PANEL_ID);
-  if (!hint || !panel) return;
+  createLauncher();
+  const el = document.getElementById(LAUNCHER_ID);
+  if (!el) return;
 
   const data = extractJobData(document, window.location.href);
+  let applied = false;
   try {
     const found = await chrome.runtime.sendMessage({
       type: 'FIND_APPLICATION',
       extractedData: data,
     });
-    if (found?.matched) {
-      panel.classList.add('jt-applied');
-      const when = found.dateApplied ? ` on ${found.dateApplied}` : '';
-      const status = found.status ? ` (${found.status})` : '';
-      hint.innerHTML = `<span class="jt-applied-badge">Already applied</span><br>This job is in your tracker${when}${status}. It will not be saved again.`;
-      return;
-    }
+    applied = Boolean(found?.matched);
   } catch {
     /* no sheet connected yet */
   }
 
-  panel.classList.remove('jt-applied');
-  hint.textContent = 'Click the Job Tracker icon in the toolbar to save this job.';
-}
-
-function showPanel() {
-  if (window !== window.top) return;
-  createPanel();
-  refreshPanelCopy();
-  const panel = document.getElementById(PANEL_ID);
-  if (panel) {
-    panel.classList.remove('jt-hidden');
-    panelVisible = true;
+  el.dataset.applied = applied ? '1' : '0';
+  const label = el.querySelector('.jt-launcher-label');
+  if (label) {
+    label.textContent = applied ? 'Already applied' : 'Job Tracker';
   }
-}
-
-function hidePanel() {
-  const panel = document.getElementById(PANEL_ID);
-  if (panel) {
-    panel.classList.add('jt-hidden');
-    panelVisible = false;
+  const btn = el.querySelector('.jt-launcher-btn');
+  if (btn) {
+    btn.title = applied ? 'Already saved — open Job Tracker' : 'Open Job Tracker';
   }
+  syncLauncherVisibility();
 }
 
-function togglePanel() {
-  if (panelVisible) hidePanel();
-  else showPanel();
+function showLauncher() {
+  if (window !== window.top || dismissed) return;
+  createLauncher();
+  launcherVisible = true;
+  refreshLauncherState();
+}
+
+function hideLauncher() {
+  launcherVisible = false;
+  const el = document.getElementById(LAUNCHER_ID);
+  if (el) el.classList.add('jt-hidden');
 }
 
 function pageLooksReady() {
@@ -129,10 +153,12 @@ function pageLooksReady() {
   );
 }
 
-function maybeShowPanel(autoShow) {
-  if (!autoShow || window !== window.top) return;
+function maybeShowLauncher(autoShow) {
+  if (!autoShow || window !== window.top || dismissed) return;
   if (isLikelyJobPage(window.location.href, document)) {
-    showPanel();
+    showLauncher();
+  } else {
+    hideLauncher();
   }
 }
 
@@ -145,7 +171,7 @@ function watchForLateContent(autoShow) {
     lateScanTimer = setTimeout(() => {
       if (isLikelyJobPage(window.location.href, document)) {
         observer.disconnect();
-        showPanel();
+        showLauncher();
       }
     }, 400);
   });
@@ -163,10 +189,9 @@ async function init() {
   const autoShow = settings?.autoShowPopup !== false;
 
   const start = () => {
-    maybeShowPanel(autoShow);
-    // SPA / delayed ATS renders
+    maybeShowLauncher(autoShow);
     if (!pageLooksReady()) {
-      setTimeout(() => maybeShowPanel(autoShow), 1200);
+      setTimeout(() => maybeShowLauncher(autoShow), 1200);
     }
     watchForLateContent(autoShow);
   };
