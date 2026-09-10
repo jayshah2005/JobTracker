@@ -36,7 +36,7 @@ asks to push.
 | Scope | Use for |
 |-------|---------|
 | `sidepanel` | Chrome side panel HTML/CSS/JS |
-| `popup` | Legacy toolbar popup UI |
+| `popup` | **Deprecated — removed.** Do not use; prefer `sidepanel` |
 | `content` | Content scripts, floating tip panel |
 | `background` | Service worker / message routing |
 | `sheets` | Google Sheets API, row writes, tab sync |
