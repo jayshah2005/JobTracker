@@ -5,6 +5,7 @@ import {
   isDestructiveOp,
 } from '../lib/schema-editor.js';
 import { normalizeDropdownOptions, normalizeDropdownDefault } from '../lib/field-mapper.js';
+import { getSettings, saveSettings } from '../lib/storage.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -143,8 +144,7 @@ function getColumnUniqueValues(tab, columnIndex) {
 }
 
 async function loadSettings() {
-  const data = await chrome.storage.local.get('settings');
-  settings = data.settings || {};
+  settings = await getSettings();
   $('#auto-show').checked = settings.autoShowPopup !== false;
   $('#embed-role-link').checked = settings.embedRoleHyperlink !== false;
   $('#default-status').value = settings.defaultApplicationStatus || 'Applied';
@@ -157,12 +157,12 @@ async function loadUndoStack() {
 }
 
 async function saveSettingsFromUI() {
-  settings = {
+  await saveSettings({
     autoShowPopup: $('#auto-show').checked,
     embedRoleHyperlink: $('#embed-role-link').checked,
     defaultApplicationStatus: $('#default-status').value || 'Applied',
-  };
-  await chrome.storage.local.set({ settings });
+  });
+  settings = await getSettings();
 }
 
 async function handleAddSheet() {

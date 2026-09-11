@@ -1,4 +1,4 @@
-@import url('../popup/popup.css');
+@import url('./base.css');
 
 body {
   width: auto;

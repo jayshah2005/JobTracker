@@ -8,8 +8,8 @@ import {
   getAllDestinations,
   shouldShowDestinationPicker,
 } from '../lib/sheet-config.js';
-import { pickBestExtraction } from '../lib/job-extractor.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
+import { getSettings } from '../lib/storage.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -29,18 +29,7 @@ function draftKey(tabId) {
   return `sidepanelDraft:${tabId}`;
 }
 
-function notifyPageSidePanelState(open) {
-  if (!boundTabId) return;
-  chrome.tabs
-    .sendMessage(boundTabId, {
-      type: 'SIDE_PANEL_STATE',
-      open: Boolean(open),
-    })
-    .catch(() => {});
-}
-
 async function collapseSidePanel() {
-  notifyPageSidePanelState(false);
   try {
     await chrome.runtime.sendMessage({
       type: 'CLOSE_SIDE_PANEL',
@@ -58,8 +47,12 @@ async function collapseSidePanel() {
 
 async function init() {
   boundTabId = await resolveBoundTabId();
-  notifyPageSidePanelState(true);
-  window.addEventListener('pagehide', () => notifyPageSidePanelState(false));
+  window.addEventListener('pagehide', () => {
+    if (boundTabId == null) return;
+    chrome.runtime
+      .sendMessage({ type: 'SIDE_PANEL_UNLOADED', tabId: boundTabId })
+      .catch(() => {});
+  });
 
   const openSettings = (e) => {
     e.preventDefault();
@@ -143,10 +136,10 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   if (!quiet) showView('loading');
   existingMatch = null;
 
-  const [authRes, sheetsRes, settingsRes, tab] = await Promise.all([
+  const [authRes, sheetsRes, settingsFromStore, tab] = await Promise.all([
     sendMessage({ type: 'GET_AUTH_STATUS' }),
     sendMessage({ type: 'GET_SHEETS' }),
-    chrome.storage.local.get('settings'),
+    getSettings(),
     boundTabId
       ? chrome.tabs.get(boundTabId).catch(() => null)
       : getActiveTab(),
@@ -172,7 +165,7 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   }
 
   sheets = sheetsRes.sheets || [];
-  settings = { defaultApplicationStatus: 'Applied', ...settingsRes.settings };
+  settings = { defaultApplicationStatus: 'Applied', ...settingsFromStore };
   destinations = getAllDestinations(sheets);
 
   if (sheets.length === 0) {
@@ -944,44 +937,12 @@ async function getActiveTab() {
 
 async function getPageJobData(tab) {
   if (!tab?.id) return { url: tab?.url || '', confidence: {}, sources: {} };
-
-  const results = [];
-
-  try {
-    const res = await chrome.tabs.sendMessage(tab.id, {
-      type: 'GET_PAGE_JOB_DATA',
-    });
-    if (res?.data) results.push(res);
-  } catch {
-    /* content script may not be loaded yet */
-  }
-
-  try {
-    const injected = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
-      func: async () => {
-        try {
-          const mod = await import(chrome.runtime.getURL('lib/job-extractor.js'));
-          return {
-            success: true,
-            data: mod.extractJobData(document, location.href),
-            isJobPage: mod.isLikelyJobPage(location.href, document),
-          };
-        } catch (err) {
-          return { success: false, error: String(err) };
-        }
-      },
-    });
-    for (const frame of injected || []) {
-      if (frame?.result?.success && frame.result.data) {
-        results.push(frame.result);
-      }
-    }
-  } catch {
-    /* restricted pages or missing permission */
-  }
-
-  return pickBestExtraction(results, tab.url || '');
+  const res = await sendMessage({
+    type: 'GET_TAB_JOB_DATA',
+    tabId: tab.id,
+    url: tab.url || '',
+  });
+  return res?.data || { url: tab.url || '', confidence: {}, sources: {} };
 }
 
 function escapeHtml(str) {
