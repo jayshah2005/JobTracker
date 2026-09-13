@@ -1,9 +1,10 @@
 /**
- * Content script — detects job pages and shows a Simplify-style launcher.
- * Injected into all frames so iframe-hosted ATS postings are covered.
+ * Content script — job-page detection + floating launcher only.
+ * Sheets / auth / side-panel chrome live in background modules.
  */
 
 import { extractJobData, isLikelyJobPage } from '../lib/job-extractor.js';
+import { getSettings } from '../lib/storage.js';
 
 const LAUNCHER_ID = 'job-tracker-launcher';
 let launcherVisible = false;
@@ -18,6 +19,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       data: extractJobData(document, window.location.href),
       isJobPage: isLikelyJobPage(window.location.href, document),
     });
+    return;
   }
   if (message.type === 'SIDE_PANEL_STATE') {
     if (window === window.top) {
@@ -25,23 +27,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       syncLauncherVisibility();
     }
     sendResponse({ success: true });
-  }
-  if (message.type === 'TOGGLE_PANEL') {
-    if (window === window.top) {
-      if (launcherVisible) hideLauncher();
-      else showLauncher();
-      sendResponse({ success: true, visible: launcherVisible });
-    } else {
-      sendResponse({ success: true, visible: false, skipped: true });
-    }
-  }
-  if (message.type === 'HIDE_PANEL') {
-    if (window === window.top) {
-      hideLauncher();
-      sendResponse({ success: true });
-    } else {
-      sendResponse({ success: true, skipped: true });
-    }
   }
   return true;
 });
@@ -99,44 +84,13 @@ function syncLauncherVisibility() {
   const shouldShow =
     launcherVisible && !dismissed && !sidePanelOpen && isLikelyJobPage(location.href, document);
   el.classList.toggle('jt-hidden', !shouldShow);
-  el.classList.toggle('jt-applied', el.dataset.applied === '1');
-}
-
-async function refreshLauncherState() {
-  if (window !== window.top) return;
-  createLauncher();
-  const el = document.getElementById(LAUNCHER_ID);
-  if (!el) return;
-
-  const data = extractJobData(document, window.location.href);
-  let applied = false;
-  try {
-    const found = await chrome.runtime.sendMessage({
-      type: 'FIND_APPLICATION',
-      extractedData: data,
-    });
-    applied = Boolean(found?.matched);
-  } catch {
-    /* no sheet connected yet */
-  }
-
-  el.dataset.applied = applied ? '1' : '0';
-  const label = el.querySelector('.jt-launcher-label');
-  if (label) {
-    label.textContent = applied ? 'Already applied' : 'Job Tracker';
-  }
-  const btn = el.querySelector('.jt-launcher-btn');
-  if (btn) {
-    btn.title = applied ? 'Already saved — open Job Tracker' : 'Open Job Tracker';
-  }
-  syncLauncherVisibility();
 }
 
 function showLauncher() {
   if (window !== window.top || dismissed) return;
   createLauncher();
   launcherVisible = true;
-  refreshLauncherState();
+  syncLauncherVisibility();
 }
 
 function hideLauncher() {
@@ -185,8 +139,8 @@ function watchForLateContent(autoShow) {
 }
 
 async function init() {
-  const { settings } = await chrome.storage.local.get('settings');
-  const autoShow = settings?.autoShowPopup !== false;
+  const settings = await getSettings();
+  const autoShow = settings.autoShowPopup !== false;
 
   const start = () => {
     maybeShowLauncher(autoShow);
