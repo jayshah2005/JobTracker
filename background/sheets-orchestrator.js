@@ -419,7 +419,6 @@ export async function saveJob(message) {
 
     const row = buildRowFromMappings(tab.mappings, rows, extractedData, {
       ...userInputs,
-      defaultApplicationStatus: settings.defaultApplicationStatus,
       embedRoleHyperlink: settings.embedRoleHyperlink !== false,
     });
 

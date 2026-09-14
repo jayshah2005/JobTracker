@@ -25,7 +25,6 @@ async function init() {
   $('#undo-btn').addEventListener('click', () => handleUndo());
   $('#auto-show').addEventListener('change', saveSettingsFromUI);
   $('#embed-role-link').addEventListener('change', saveSettingsFromUI);
-  $('#default-status').addEventListener('change', saveSettingsFromUI);
   $('#sign-in-btn').addEventListener('click', handleSignIn);
   $('#sign-out-btn').addEventListener('click', handleSignOut);
   $('#open-connect-btn')?.addEventListener('click', openConnectPage);
@@ -147,7 +146,6 @@ async function loadSettings() {
   settings = await getSettings();
   $('#auto-show').checked = settings.autoShowPopup !== false;
   $('#embed-role-link').checked = settings.embedRoleHyperlink !== false;
-  $('#default-status').value = settings.defaultApplicationStatus || 'Applied';
 }
 
 async function loadUndoStack() {
@@ -160,7 +158,6 @@ async function saveSettingsFromUI() {
   await saveSettings({
     autoShowPopup: $('#auto-show').checked,
     embedRoleHyperlink: $('#embed-role-link').checked,
-    defaultApplicationStatus: $('#default-status').value || 'Applied',
   });
   settings = await getSettings();
 }
