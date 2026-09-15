@@ -24,14 +24,14 @@ describe('storage', () => {
 
   test('merges settings with defaults', async () => {
     const settings = await getSettings();
-    expect(settings.defaultApplicationStatus).toBe('Applied');
     expect(settings.autoShowPopup).toBe(true);
+    expect(settings.embedRoleHyperlink).toBe(true);
   });
 
   test('persists setting overrides', async () => {
-    await saveSettings({ defaultApplicationStatus: 'Interviewing' });
+    await saveSettings({ embedRoleHyperlink: false });
     const settings = await getSettings();
-    expect(settings.defaultApplicationStatus).toBe('Interviewing');
+    expect(settings.embedRoleHyperlink).toBe(false);
     expect(settings.autoShowPopup).toBe(true);
   });
 });

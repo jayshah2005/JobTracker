@@ -121,7 +121,7 @@ describe('buildRowFromMappings', () => {
         jobId: '998877',
         location: 'Mountain View',
       },
-      { defaultApplicationStatus: 'Applied' }
+      {}
     );
     expect(row[1]).toBe('998877');
     expect(row[2]).toBe('Google');
@@ -142,7 +142,7 @@ describe('buildRowFromMappings', () => {
         role: 'Intern',
         url: 'https://boards.example.com/jobs/445566',
       },
-      { defaultApplicationStatus: 'Applied' }
+      {}
     );
     expect(row[1]).toBe('445566');
   });
@@ -332,7 +332,7 @@ describe('getFieldsNeedingInput', () => {
         jobId: '12345',
         location: 'NYC',
       },
-      { defaultApplicationStatus: 'Applied' }
+      {}
     );
     const byTag = Object.fromEntries(fields.map((f) => [f.tag, f]));
     expect(byTag[FIELD_TAGS.DATE_APPLIED].autoFilled).toBe(true);

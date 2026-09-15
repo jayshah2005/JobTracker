@@ -165,7 +165,7 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   }
 
   sheets = sheetsRes.sheets || [];
-  settings = { defaultApplicationStatus: 'Applied', ...settingsFromStore };
+  settings = settingsFromStore;
   destinations = getAllDestinations(sheets);
 
   if (sheets.length === 0) {
@@ -380,7 +380,7 @@ function renderDynamicFields({ preferExistingInputs = false } = {}) {
 
   const container = $('#dynamic-fields');
   const mappings = selectedDestination.mappings || [];
-  const fields = getFieldsNeedingInput(mappings, extractedData, settings);
+  const fields = getFieldsNeedingInput(mappings, extractedData);
 
   if (fields.length === 0) {
     container.innerHTML = '';
@@ -454,7 +454,7 @@ function renderField(field, preferExistingInputs = false) {
   const suggested =
     (preferExistingInputs && existingCol) ||
     field.suggestedValue ||
-    getAutoValue(field.tag, extractedData, settings) ||
+    getAutoValue(field.tag, extractedData) ||
     '';
   const hint = field.autoFilled
     ? '<p class="field-hint">Auto-filled — edit if needed</p>'
@@ -782,7 +782,7 @@ function updateDestinationDropdownOptions(columnIndex, options) {
   }
 }
 
-function getAutoValue(tag, data, sett) {
+function getAutoValue(tag, data) {
   switch (tag) {
     case FIELD_TAGS.DATE_APPLIED:
     case FIELD_TAGS.CURRENT_DATE:
@@ -800,7 +800,7 @@ function getAutoValue(tag, data, sett) {
     case FIELD_TAGS.JOB_POSTED_DATE:
       return data.postedDate;
     case FIELD_TAGS.APPLICATION_STATUS:
-      return sett.defaultApplicationStatus;
+      return data.applicationStatus || 'Applied';
     default:
       return '';
   }
