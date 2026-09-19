@@ -7,8 +7,10 @@ import {
   loadSpreadsheetTabs,
   loadTabRows,
   saveJobToTab,
+  updateJobInTab,
   fetchSpreadsheetMetadata,
   syncTabHeaders,
+  rowIndexFromUpdatedRange,
 } from '../lib/sheets-api.js';
 import { parseGoogleSheetUrl } from '../lib/sheet-url.js';
 import { prepareTabConfig, mergeTabMappings } from '../lib/sheet-config.js';
@@ -347,21 +349,34 @@ export async function undoSchemaChange(entryId) {
 async function loadAllTabsWithRows(token, sheets) {
   const tabs = [];
   for (const sheet of sheets) {
-    let rawTabs = [];
+    let metaSheets = [];
     try {
-      rawTabs = await loadSpreadsheetTabs(sheet.spreadsheetId, token);
+      const meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
+      metaSheets = meta.sheets ?? [];
     } catch {
       continue;
     }
-    for (const raw of rawTabs) {
-      const configTab = sheet.tabs?.find((t) => String(t.gid) === String(raw.gid));
+    for (const entry of metaSheets) {
+      const props = entry.properties;
+      const tabName = props.title;
+      const gid = String(props.sheetId);
+      const configTab = sheet.tabs?.find((t) => String(t.gid) === gid);
+      let rows = [];
+      try {
+        // FORMULA keeps Role HYPERLINK cells as formulas so we can read the URL.
+        rows = await loadTabRows(sheet.spreadsheetId, tabName, token, {
+          valueRenderOption: 'FORMULA',
+        });
+      } catch {
+        rows = [];
+      }
       tabs.push({
         sheetName: sheet.name,
-        tabName: raw.tabName,
+        tabName,
         spreadsheetId: sheet.spreadsheetId,
-        gid: raw.gid,
+        gid,
         mappings: configTab?.mappings,
-        rows: raw.rows || [],
+        rows,
       });
     }
   }
@@ -384,7 +399,13 @@ export async function findApplication(extractedData = {}) {
 }
 
 export async function saveJob(message) {
-  const { spreadsheetId, tabId, extractedData, userInputs } = message;
+  const {
+    spreadsheetId,
+    tabId,
+    extractedData,
+    userInputs,
+    existingRowIndex = null,
+  } = message;
 
   return withSheetAccess(async (token) => {
     const sheets = await getConfiguredSheets();
@@ -394,15 +415,22 @@ export async function saveJob(message) {
     const tab = sheet.tabs.find((t) => t.tabId === tabId || t.gid === tabId);
     if (!tab) return { success: false, error: 'Tab not found' };
 
-    const allTabs = await loadAllTabsWithRows(token, sheets);
-    const existing = findExistingApplication(allTabs, extractedData);
-    if (existing.matched) {
-      return {
-        success: false,
-        alreadyApplied: true,
-        error: 'Already applied — this job is already in your tracker.',
-        match: existing,
-      };
+    const updating =
+      existingRowIndex != null &&
+      Number.isFinite(Number(existingRowIndex)) &&
+      Number(existingRowIndex) >= 0;
+
+    if (!updating) {
+      const allTabs = await loadAllTabsWithRows(token, sheets);
+      const existing = findExistingApplication(allTabs, extractedData);
+      if (existing.matched) {
+        return {
+          success: false,
+          alreadyApplied: true,
+          error: 'Already in your tracker — open it to edit.',
+          match: existing,
+        };
+      }
     }
 
     const settings = await getSettings();
@@ -422,12 +450,54 @@ export async function saveJob(message) {
       embedRoleHyperlink: settings.embedRoleHyperlink !== false,
     });
 
-    await saveJobToTab(spreadsheetId, tab.tabName, tabConfig, row, token);
+    if (updating) {
+      const rowIndex = Number(existingRowIndex);
+      if (rowIndex === 0 && rows.length && String(rows[0]?.[0] || '').trim()) {
+        // Never overwrite the header row.
+        const headerish = tab.headers?.[0];
+        if (
+          headerish &&
+          String(rows[0][0]).trim().toLowerCase() ===
+            String(headerish).trim().toLowerCase()
+        ) {
+          return { success: false, error: 'Cannot update the header row.' };
+        }
+      }
+      await updateJobInTab(spreadsheetId, tab.tabName, rowIndex, row, token);
+      return {
+        success: true,
+        updated: true,
+        row,
+        rowIndex,
+        spreadsheetId,
+        tabId: tab.gid,
+        tabName: tab.tabName,
+        sheetName: sheet.name,
+      };
+    }
+
+    const appendRes = await saveJobToTab(
+      spreadsheetId,
+      tab.tabName,
+      tabConfig,
+      row,
+      token
+    );
 
     tab.isNew = false;
     tab.rowCount = (tab.rowCount || 0) + 1;
     await saveConfiguredSheets(sheets);
 
-    return { success: true, row };
+    const rowIndex = rowIndexFromUpdatedRange(appendRes?.updates?.updatedRange);
+
+    return {
+      success: true,
+      row,
+      rowIndex,
+      spreadsheetId,
+      tabId: tab.gid,
+      tabName: tab.tabName,
+      sheetName: sheet.name,
+    };
   });
 }

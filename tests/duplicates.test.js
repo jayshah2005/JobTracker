@@ -65,6 +65,90 @@ describe('findExistingApplication', () => {
     expect(hit.status).toBe('Interview');
     expect(hit.dateApplied).toBe('2026-01-10');
     expect(hit.tabName).toBe('Jobs');
+    expect(hit.row).toEqual(tabs[0].rows[1]);
+  });
+
+  test('still matches after company and role were edited in the sheet', () => {
+    const editedTabs = [
+      {
+        ...tabs[0],
+        rows: [
+          tabs[0].rows[0],
+          [
+            '2026-01-10',
+            '99',
+            'Acme Corporation',
+            'Software Engineer II',
+            'https://jobs.acme.com/open/99',
+            'NYC',
+            'Applied',
+          ],
+        ],
+      },
+    ];
+    const hit = findExistingApplication(editedTabs, {
+      url: 'https://jobs.acme.com/open/99',
+      company: 'Acme',
+      role: 'Engineer',
+    });
+    expect(hit.matched).toBe(true);
+    expect(hit.matchedBy).toBe('url');
+  });
+
+  test('matches via Role HYPERLINK when URL column is empty', () => {
+    const linkTabs = [
+      {
+        ...tabs[0],
+        rows: [
+          tabs[0].rows[0],
+          [
+            '2026-01-10',
+            '99',
+            'Edited Co',
+            '=HYPERLINK("https://jobs.acme.com/open/99","Edited Role")',
+            '',
+            'NYC',
+            'Applied',
+          ],
+        ],
+      },
+    ];
+    const hit = findExistingApplication(linkTabs, {
+      url: 'https://jobs.acme.com/open/99',
+      company: 'Acme',
+      role: 'Engineer',
+    });
+    expect(hit.matched).toBe(true);
+    expect(hit.matchedBy).toBe('url');
+    expect(hit.role).toBe('Edited Role');
+  });
+
+  test('matches by job id when URL and titles differ', () => {
+    const idTabs = [
+      {
+        ...tabs[0],
+        rows: [
+          tabs[0].rows[0],
+          [
+            '2026-01-10',
+            'REQ-998877',
+            'Edited Co',
+            'Edited Role',
+            'https://old-ats.example.com/archived/xyz',
+            'NYC',
+            'Applied',
+          ],
+        ],
+      },
+    ];
+    const hit = findExistingApplication(idTabs, {
+      url: 'https://boards.example.com/jobs/new-path',
+      company: 'Acme',
+      role: 'Engineer',
+      jobId: 'REQ-998877',
+    });
+    expect(hit.matched).toBe(true);
+    expect(hit.matchedBy).toBe('job_id');
   });
 
   test('falls back to company + role', () => {

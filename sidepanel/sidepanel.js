@@ -3,6 +3,7 @@ import {
   getFieldsNeedingInput,
   normalizeDropdownOptions,
   normalizeDropdownDefault,
+  rowToFormInputs,
 } from '../lib/field-mapper.js';
 import {
   getAllDestinations,
@@ -20,6 +21,8 @@ let extractedData = {};
 let settings = {};
 let userInputs = {};
 let existingMatch = null;
+/** When set, Save updates this sheet row instead of appending. */
+let editingRowIndex = null;
 /** Browser tab this side panel instance is linked to. */
 let boundTabId = null;
 let boundTabUrl = '';
@@ -27,6 +30,10 @@ let refreshTimer = null;
 
 function draftKey(tabId) {
   return `sidepanelDraft:${tabId}`;
+}
+
+function isEditingExisting() {
+  return editingRowIndex != null && Number.isFinite(Number(editingRowIndex));
 }
 
 async function collapseSidePanel() {
@@ -75,6 +82,9 @@ async function init() {
 
   $('#save-btn').addEventListener('click', handleSave);
   $('#destination-picker').addEventListener('change', onDestinationChange);
+  $('#edit-existing-btn')?.addEventListener('click', () => {
+    startEditingExisting().catch((err) => showStatus(err.message, 'error'));
+  });
 
   chrome.tabs.onUpdated.addListener(onBoundTabUpdated);
   chrome.tabs.onRemoved.addListener((tabId) => {
@@ -189,15 +199,16 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
     extractedData,
   });
   if (found?.matched) {
-    existingMatch = found;
-    renderApplied();
-    showView('applied');
+    enterEditMode(found);
     return;
   }
 
+  editingRowIndex = null;
+  existingMatch = null;
   setupDestinationPicker(draft?.destinationKey);
   userInputs = previousInputs;
   renderJobCard();
+  renderEditChrome();
   renderDynamicFields({ preferExistingInputs: Boolean(Object.keys(previousInputs).length) });
   showView('save');
   await saveDraft();
@@ -317,7 +328,85 @@ function renderApplied() {
   }`;
   $('#applied-meta').textContent = `Saved${when}${status}${
     m.tabName ? ` in ${m.sheetName ? `${m.sheetName} → ` : ''}${m.tabName}` : ''
-  }. It will not be added again.`;
+  }.`;
+}
+
+function enterEditMode(match) {
+  if (match?.rowIndex == null || !Number.isFinite(Number(match.rowIndex))) {
+    showStatus('Could not find that saved row to edit. Try reopening the sidebar.', 'error');
+    return;
+  }
+
+  existingMatch = match;
+  editingRowIndex = Number(match.rowIndex);
+
+  const destKey =
+    match.spreadsheetId && match.gid != null
+      ? `${match.spreadsheetId}:${match.gid}`
+      : null;
+  setupDestinationPicker(destKey);
+
+  const mappings = selectedDestination?.mappings || [];
+  userInputs = rowToFormInputs(mappings, match.row || []);
+
+  // Prefer saved sheet values for the job card while editing.
+  extractedData = {
+    ...extractedData,
+    company: match.company || extractedData.company,
+    role: match.role || extractedData.role,
+    url: match.url || extractedData.url,
+  };
+
+  renderJobCard();
+  renderEditChrome();
+  renderDynamicFields({ preferExistingInputs: true });
+  showView('save');
+  saveDraft();
+}
+
+/** Resolve a full match (with rowIndex/row) before entering edit mode. */
+async function startEditingExisting() {
+  let match = existingMatch;
+  if (match?.rowIndex == null || !match.row) {
+    const found = await sendMessage({
+      type: 'FIND_APPLICATION',
+      extractedData,
+    });
+    if (!found?.matched) {
+      showStatus('Could not find that application in your sheet.', 'error');
+      return;
+    }
+    match = found;
+  }
+  enterEditMode(match);
+}
+
+function renderEditChrome() {
+  const editing = isEditingExisting();
+  const banner = $('#editing-banner');
+  const lockedHint = $('#destination-locked-hint');
+  const picker = $('#destination-picker');
+  const label = $('#save-btn-label');
+
+  banner?.classList.toggle('hidden', !editing);
+  lockedHint?.classList.toggle('hidden', !editing);
+  if (picker) picker.disabled = editing;
+
+  if (editing && existingMatch) {
+    const when = existingMatch.dateApplied
+      ? ` · saved ${existingMatch.dateApplied}`
+      : '';
+    const status = existingMatch.status ? ` · ${existingMatch.status}` : '';
+    const where = existingMatch.tabName
+      ? ` in ${existingMatch.sheetName ? `${existingMatch.sheetName} → ` : ''}${existingMatch.tabName}`
+      : '';
+    $('#editing-banner-meta').textContent =
+      `Update any field (status, notes, etc.)${status}${when}${where}.`;
+  }
+
+  if (label) {
+    label.textContent = editing ? 'Update tracker' : 'Save to tracker';
+  }
 }
 
 function companyInitials(name) {
@@ -843,43 +932,96 @@ async function handleSave() {
   }
 
   const btn = $('#save-btn');
+  const editing = isEditingExisting();
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Saving…';
+  btn.innerHTML = `<span class="spinner"></span>${editing ? 'Updating…' : 'Saving…'}`;
 
   collectFieldValues();
   await saveDraft();
 
   try {
-    const res = await sendMessage({
+    const payload = {
       type: 'SAVE_JOB',
       spreadsheetId: selectedDestination.sheetId,
       tabId: selectedDestination.gid,
       extractedData,
       userInputs,
-    });
+    };
+    if (editing) {
+      payload.existingRowIndex = Number(editingRowIndex);
+    }
+
+    const res = await sendMessage(payload);
 
     if (res.alreadyApplied && res.match) {
+      // Happens if Update was attempted without a row index — recover into edit mode.
       existingMatch = res.match;
-      renderApplied();
-      showView('applied');
+      enterEditMode(res.match);
+      showStatus(
+        'Already in your tracker. Make your edits again, then click Update tracker.',
+        'error'
+      );
       return;
     }
 
     if (res.success) {
-      showStatus('Saved to your tracker.', 'success');
       if (boundTabId && chrome.storage?.session) {
         await chrome.storage.session.remove(draftKey(boundTabId));
       }
-      existingMatch = {
-        matched: true,
-        role: extractedData.role,
-        company: extractedData.company,
-        dateApplied: new Date().toISOString().slice(0, 10),
-        tabName: selectedDestination.tabName,
-        sheetName: selectedDestination.sheetName,
-      };
-      renderApplied();
-      showView('applied');
+
+      const statusCol = selectedDestination.mappings?.find((m) =>
+        /application status/i.test(m.header || '')
+      )?.columnIndex;
+      const statusValue =
+        (statusCol != null &&
+          (userInputs[`dropdown_${statusCol}`] || userInputs[`col_${statusCol}`])) ||
+        '';
+
+      if (res.updated) {
+        editingRowIndex = res.rowIndex;
+        existingMatch = {
+          matched: true,
+          role: extractedData.role,
+          company: extractedData.company,
+          dateApplied: existingMatch?.dateApplied || '',
+          status: statusValue || existingMatch?.status || '',
+          tabName: selectedDestination.tabName,
+          sheetName: selectedDestination.sheetName,
+          spreadsheetId: selectedDestination.sheetId,
+          gid: selectedDestination.gid,
+          rowIndex: res.rowIndex,
+          row: res.row,
+        };
+        userInputs = rowToFormInputs(
+          selectedDestination.mappings || [],
+          res.row || []
+        );
+        renderEditChrome();
+        renderDynamicFields({ preferExistingInputs: true });
+        showStatus('Updated in your tracker.', 'success');
+      } else {
+        const savedRowIndex =
+          res.rowIndex != null && Number.isFinite(Number(res.rowIndex))
+            ? Number(res.rowIndex)
+            : null;
+        existingMatch = {
+          matched: true,
+          role: extractedData.role,
+          company: extractedData.company,
+          dateApplied: new Date().toISOString().slice(0, 10),
+          status: statusValue,
+          tabName: selectedDestination.tabName,
+          sheetName: selectedDestination.sheetName,
+          spreadsheetId: selectedDestination.sheetId,
+          gid: selectedDestination.gid,
+          rowIndex: savedRowIndex,
+          row: res.row,
+        };
+        editingRowIndex = null;
+        renderApplied();
+        showView('applied');
+        showStatus('Saved to your tracker.', 'success');
+      }
     } else {
       showStatus(res.error || 'Failed to save.', 'error');
     }
@@ -887,15 +1029,22 @@ async function handleSave() {
     showStatus(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-        <path d="M17 21v-8H7v8" />
-        <path d="M7 3v5h8" />
-      </svg>
-      Save to tracker
-    `;
+    restoreSaveButton();
   }
+}
+
+function restoreSaveButton() {
+  const btn = $('#save-btn');
+  if (!btn) return;
+  const label = isEditingExisting() ? 'Update tracker' : 'Save to tracker';
+  btn.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <path d="M17 21v-8H7v8" />
+      <path d="M7 3v5h8" />
+    </svg>
+    <span id="save-btn-label">${label}</span>
+  `;
 }
 
 function collectFieldValues() {

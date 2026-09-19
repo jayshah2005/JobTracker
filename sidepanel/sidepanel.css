@@ -299,6 +299,29 @@ body {
   background: #eff6ff;
 }
 
+.applied-banner-card .btn {
+  margin-top: 12px;
+}
+
+.editing-banner {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  border-radius: var(--jt-radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.editing-banner-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d4ed8;
+  margin-bottom: 2px;
+}
+
+.editing-banner .field-hint {
+  margin: 0;
+}
+
 .applied-badge {
   display: inline-block;
   font-size: 11px;

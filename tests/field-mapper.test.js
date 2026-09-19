@@ -14,8 +14,9 @@ import {
   buildColumnUniques,
   buildHyperlinkFormula,
   hyperlinkLabel,
+  rowToFormInputs,
 } from '../lib/field-mapper.js';
-import { FIELD_TAGS } from '../lib/constants.js';
+import { FIELD_TAGS, DEFAULT_APPLICATION_STATUSES } from '../lib/constants.js';
 
 describe('guessTagFromHeader', () => {
   test('maps known headers', () => {
@@ -157,6 +158,25 @@ describe('buildRowFromMappings', () => {
     expect(row[2]).toBe('Manual Co');
     // No URL available → plain role text
     expect(row[3]).toBe('Manual Role');
+  });
+
+  test('keeps page URL when the form URL field was cleared', () => {
+    const row = buildRowFromMappings(
+      mappings,
+      rows,
+      {
+        company: 'Acme',
+        role: 'Engineer',
+        url: 'https://jobs.acme.com/open/99',
+      },
+      {
+        col_2: 'Acme Corporation',
+        col_3: 'Software Engineer',
+        col_4: '',
+      }
+    );
+    expect(row[2]).toBe('Acme Corporation');
+    expect(row[4]).toBe('https://jobs.acme.com/open/99');
   });
 
   test('role embeds posting URL as a Sheets hyperlink', () => {
@@ -455,5 +475,34 @@ describe('mergeDropdownOptions / column uniques', () => {
 describe('formatDate', () => {
   test('formats as YYYY-MM-DD', () => {
     expect(formatDate(new Date(2025, 8, 2))).toBe('2025-09-02');
+  });
+});
+
+describe('rowToFormInputs', () => {
+  test('prefills form keys from a saved row including hyperlink role', () => {
+    const mappings = buildDefaultMappings();
+    const inputs = rowToFormInputs(mappings, [
+      '2026-01-10',
+      '99',
+      'Acme Corp',
+      '=HYPERLINK("https://jobs.acme.com/open/99","Engineer")',
+      'https://jobs.acme.com/open/99',
+      'NYC',
+      'Not Applied',
+    ]);
+    expect(inputs.col_2).toBe('Acme Corp');
+    expect(inputs.company_name).toBe('Acme Corp');
+    expect(inputs.col_3).toBe('Engineer');
+    expect(inputs.role).toBe('Engineer');
+    expect(inputs.col_4).toBe('https://jobs.acme.com/open/99');
+    expect(inputs.col_6).toBe('Not Applied');
+    expect(inputs.dropdown_6).toBe('Not Applied');
+  });
+});
+
+describe('DEFAULT_APPLICATION_STATUSES', () => {
+  test('includes Not Applied for wishlist / pre-apply tracking', () => {
+    expect(DEFAULT_APPLICATION_STATUSES).toContain('Not Applied');
+    expect(DEFAULT_APPLICATION_STATUSES).toContain('Applied');
   });
 });
