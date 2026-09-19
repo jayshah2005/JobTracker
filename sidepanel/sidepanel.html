@@ -94,13 +94,21 @@
 
       <div id="applied-view" class="sp-view hidden">
         <div class="job-card applied-banner-card">
-          <div class="applied-badge">Already applied</div>
+          <div class="applied-badge">Already in tracker</div>
           <p id="applied-summary" class="applied-summary"></p>
           <p id="applied-meta" class="field-hint"></p>
+          <button type="button" class="btn btn-primary-outline" id="edit-existing-btn">
+            Edit application
+          </button>
         </div>
       </div>
 
       <div id="save-view" class="sp-view hidden">
+        <div id="editing-banner" class="editing-banner hidden">
+          <div class="editing-banner-title">Editing saved application</div>
+          <p id="editing-banner-meta" class="field-hint"></p>
+        </div>
+
         <section class="job-card" id="job-card">
           <div class="job-card-top">
             <div class="job-avatar" id="job-avatar" aria-hidden="true">JT</div>
@@ -126,6 +134,9 @@
           <div class="panel-card-body">
             <label class="sr-only" for="destination-picker">Save to</label>
             <select id="destination-picker"></select>
+            <p id="destination-locked-hint" class="field-hint hidden">
+              Destination is locked while editing this row.
+            </p>
           </div>
         </section>
 
@@ -151,7 +162,7 @@
               <path d="M17 21v-8H7v8" />
               <path d="M7 3v5h8" />
             </svg>
-            Save to tracker
+            <span id="save-btn-label">Save to tracker</span>
           </button>
         </div>
       </div>
