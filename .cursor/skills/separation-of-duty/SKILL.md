@@ -93,5 +93,5 @@ Stop and relocate if you notice:
 
 ## After the change
 
-- Keep modules single-purpose; update this map when a **new lasting layer** is introduced (ask user before new git-commit scopes).
+- Keep modules single-purpose; update this map when a **new lasting layer** is introduced (ask before new commit scopes — see `.cursor/rules/git-commit.mdc`).
 - Prefer a one-sentence duty comment at the top of each background module.
