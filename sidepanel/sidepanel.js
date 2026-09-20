@@ -4,6 +4,8 @@ import {
   normalizeDropdownOptions,
   normalizeDropdownDefault,
   rowToFormInputs,
+  formatDate,
+  toDateInputValue,
 } from '../lib/field-mapper.js';
 import {
   getAllDestinations,
@@ -540,11 +542,19 @@ function renderField(field, preferExistingInputs = false) {
       </div>`;
   }
 
-  const suggested =
+  const suggestedRaw =
     (preferExistingInputs && existingCol) ||
     field.suggestedValue ||
     getAutoValue(field.tag, extractedData) ||
     '';
+  const isDateField =
+    field.tag === FIELD_TAGS.DATE_APPLIED ||
+    field.tag === FIELD_TAGS.CURRENT_DATE ||
+    field.tag === FIELD_TAGS.JOB_POSTED_DATE;
+  const suggested = isDateField
+    ? toDateInputValue(suggestedRaw) ||
+      (field.tag === FIELD_TAGS.JOB_POSTED_DATE ? '' : formatDate())
+    : suggestedRaw;
   const hint = field.autoFilled
     ? '<p class="field-hint">Auto-filled — edit if needed</p>'
     : field.hint
@@ -561,12 +571,7 @@ function renderField(field, preferExistingInputs = false) {
       </div>`;
   }
 
-  const inputType =
-    field.tag === FIELD_TAGS.DATE_APPLIED ||
-    field.tag === FIELD_TAGS.CURRENT_DATE ||
-    field.tag === FIELD_TAGS.JOB_POSTED_DATE
-      ? 'date'
-      : 'text';
+  const inputType = isDateField ? 'date' : 'text';
 
   return `
     <div class="field-row${lowClass}">
@@ -875,7 +880,7 @@ function getAutoValue(tag, data) {
   switch (tag) {
     case FIELD_TAGS.DATE_APPLIED:
     case FIELD_TAGS.CURRENT_DATE:
-      return formatToday();
+      return formatDate();
     case FIELD_TAGS.ID:
       return data.jobId || '';
     case FIELD_TAGS.COMPANY_NAME:
@@ -887,7 +892,7 @@ function getAutoValue(tag, data) {
     case FIELD_TAGS.LOCATION:
       return data.location;
     case FIELD_TAGS.JOB_POSTED_DATE:
-      return data.postedDate;
+      return toDateInputValue(data.postedDate) || data.postedDate || '';
     case FIELD_TAGS.APPLICATION_STATUS:
       return data.applicationStatus || 'Applied';
     default:
@@ -895,17 +900,23 @@ function getAutoValue(tag, data) {
   }
 }
 
-function formatToday() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 function setUserInputForField(tag, columnIndex, type, value) {
   const col = String(columnIndex);
-  const next = value == null ? '' : String(value);
+  let next = value == null ? '' : String(value);
+  if (
+    tag === FIELD_TAGS.DATE_APPLIED ||
+    tag === FIELD_TAGS.CURRENT_DATE ||
+    tag === FIELD_TAGS.JOB_POSTED_DATE
+  ) {
+    const normalized = toDateInputValue(next);
+    if (normalized) next = normalized;
+    else if (
+      (tag === FIELD_TAGS.DATE_APPLIED || tag === FIELD_TAGS.CURRENT_DATE) &&
+      !next.trim()
+    ) {
+      next = formatDate();
+    }
+  }
   userInputs[`col_${col}`] = next;
   if (type === 'dropdown') {
     userInputs[`dropdown_${col}`] = next;
@@ -1008,7 +1019,7 @@ async function handleSave() {
           matched: true,
           role: extractedData.role,
           company: extractedData.company,
-          dateApplied: new Date().toISOString().slice(0, 10),
+          dateApplied: formatDate(),
           status: statusValue,
           tabName: selectedDestination.tabName,
           sheetName: selectedDestination.sheetName,

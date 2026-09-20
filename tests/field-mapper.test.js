@@ -8,6 +8,7 @@ import {
   getFieldsNeedingInput,
   generateNextId,
   formatDate,
+  toDateInputValue,
   resolveFieldTag,
   normalizeDropdownOptions,
   mergeDropdownOptions,
@@ -475,6 +476,51 @@ describe('mergeDropdownOptions / column uniques', () => {
 describe('formatDate', () => {
   test('formats as YYYY-MM-DD', () => {
     expect(formatDate(new Date(2025, 8, 2))).toBe('2025-09-02');
+  });
+});
+
+describe('date applied on save', () => {
+  test('empty col_ does not wipe Date Applied', () => {
+    const mappings = buildDefaultMappings();
+    const row = buildRowFromMappings(
+      mappings,
+      [],
+      { company: 'Acme', role: 'Eng', url: 'https://x.com/j/1' },
+      { col_0: '', date_applied: '' }
+    );
+    expect(row[0]).toBe(formatDate());
+  });
+
+  test('explicit date from the form is kept', () => {
+    const mappings = buildDefaultMappings();
+    const row = buildRowFromMappings(
+      mappings,
+      [],
+      { company: 'Acme', role: 'Eng', url: 'https://x.com/j/1' },
+      { col_0: '2026-01-15' }
+    );
+    expect(row[0]).toBe('2026-01-15');
+  });
+
+  test('toDateInputValue normalizes US sheet dates', () => {
+    expect(toDateInputValue('9/19/2026')).toBe('2026-09-19');
+    expect(toDateInputValue('2026-09-19')).toBe('2026-09-19');
+    expect(toDateInputValue('')).toBe('');
+  });
+
+  test('rowToFormInputs normalizes Date Applied for date inputs', () => {
+    const mappings = buildDefaultMappings();
+    const inputs = rowToFormInputs(mappings, [
+      '9/19/2026',
+      '1',
+      'Acme',
+      'Eng',
+      'https://x.com',
+      'NYC',
+      'Applied',
+    ]);
+    expect(inputs.col_0).toBe('2026-09-19');
+    expect(inputs.date_applied).toBe('2026-09-19');
   });
 });
 
