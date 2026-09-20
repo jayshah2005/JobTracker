@@ -51,12 +51,13 @@ function createLauncher() {
   root.className = 'jt-launcher jt-hidden';
   root.innerHTML = `
     <button type="button" class="jt-launcher-btn" title="Open Job Tracker" aria-label="Open Job Tracker">
-      <span class="jt-launcher-logo" aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M7 4h7l3 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="#fff"/>
-          <path d="M14 4v4h4" stroke="#bfdbfe" stroke-width="1.5"/>
-        </svg>
-      </span>
+      <img
+        class="jt-launcher-logo"
+        src="${chrome.runtime.getURL('icons/logo.png')}"
+        width="28"
+        height="28"
+        alt=""
+      />
       <span class="jt-launcher-label">Job Tracker</span>
     </button>
     <button type="button" class="jt-launcher-dismiss" title="Hide" aria-label="Hide Job Tracker button">×</button>
