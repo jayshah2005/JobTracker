@@ -156,15 +156,64 @@ body {
   overflow: visible;
 }
 
-.add-sheet-form {
-  display: flex;
-  gap: 8px;
+.add-sheet-block {
   margin-bottom: 20px;
 }
 
+.add-sheet-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jt-text);
+  margin-bottom: 4px;
+}
+
+.add-sheet-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--jt-muted);
+}
+
+.add-sheet-form {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
 .add-sheet-form input {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
   margin-bottom: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+/* .btn-primary is width:100% globally — keep Add Sheet content-sized in this row */
+.add-sheet-form .btn-primary {
+  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 10px 16px;
+}
+
+.add-sheet-example {
+  margin: 0;
+  font-size: 11px;
+  color: var(--jt-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (max-width: 520px) {
+  .add-sheet-form {
+    flex-direction: column;
+  }
+
+  .add-sheet-form .btn-primary {
+    width: 100%;
+  }
 }
 
 .settings-grid {

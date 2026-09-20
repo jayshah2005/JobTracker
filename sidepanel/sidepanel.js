@@ -167,9 +167,13 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   if (!signedIn) {
     showView('signin');
     $('#sign-in-btn').classList.toggle('hidden', needsSetup);
-    $('#open-connect-btn').classList.toggle('hidden', !needsSetup);
+    $('#open-connect-btn').classList.remove('hidden');
     $('#open-connect-btn').classList.toggle('btn-primary', needsSetup);
     $('#open-connect-btn').classList.toggle('btn-secondary', !needsSetup);
+    const connectBtn = $('#open-connect-btn');
+    if (connectBtn) {
+      connectBtn.textContent = needsSetup ? 'Set up Google' : 'Google help';
+    }
     $('#signin-copy').textContent = needsSetup
       ? 'First-time setup opens in a full page. Follow the steps there, then come back to sign in.'
       : 'Sign in with Google once. That account is used for every spreadsheet you add.';

@@ -64,13 +64,26 @@
 
       <div class="section">
         <div class="section-title">Spreadsheets</div>
-        <div class="add-sheet-form">
-          <input
-            type="url"
-            id="sheet-url"
-            placeholder="https://docs.google.com/spreadsheets/d/..."
-          />
-          <button class="btn btn-primary btn-sm" id="add-sheet-btn">Add Sheet</button>
+        <div class="add-sheet-block">
+          <label class="add-sheet-label" for="sheet-url">Paste a Google Sheets link</label>
+          <p class="add-sheet-hint">
+            Copy the spreadsheet URL from your browser address bar, then paste it here.
+            You need Editor access on that sheet.
+          </p>
+          <div class="add-sheet-form">
+            <input
+              type="url"
+              id="sheet-url"
+              placeholder="https://docs.google.com/spreadsheets/d/…"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="sheet-url-hint"
+            />
+            <button class="btn btn-primary" id="add-sheet-btn" type="button">Add Sheet</button>
+          </div>
+          <p id="sheet-url-hint" class="add-sheet-example">
+            Example: https://docs.google.com/spreadsheets/d/1abc…/edit
+          </p>
         </div>
         <div id="sheet-list" class="sheet-list"></div>
         <div class="actions-row">
