@@ -8,9 +8,24 @@ body {
 }
 
 .page-header {
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: linear-gradient(135deg, #6b5ea8, #8b7bc4);
   color: #fff;
   padding: 24px 32px;
+}
+
+.page-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.page-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
 }
 
 .page-header h1 {
