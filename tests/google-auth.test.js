@@ -3,6 +3,7 @@ import {
   SIGN_IN_REQUIRED,
   isValidClientId,
   effectiveClientId,
+  effectiveClientSecret,
   isAccessTokenFresh,
   normalizeRedirectUri,
   buildGoogleAuthUrl,
@@ -52,6 +53,12 @@ describe('client ID helpers', () => {
       '123-abc.apps.googleusercontent.com'
     );
     expect(effectiveClientId('')).toBe('');
+  });
+
+  test('effectiveClientSecret prefers stored then empty default', () => {
+    expect(effectiveClientSecret('secret-from-storage')).toBe('secret-from-storage');
+    expect(effectiveClientSecret('')).toBe('');
+    expect(effectiveClientSecret(null)).toBe('');
   });
 });
 

@@ -42,14 +42,18 @@ If you’ve already saved that job, you’ll see **Already applied** and it won�
 
 ## Publish (Chrome Web Store)
 
+Publisher setup (OAuth app, redirect URI, packing secrets):
+[`store/PUBLISHER_OAUTH.md`](store/PUBLISHER_OAUTH.md).
+
 ```bash
+cp .env.oauth.example .env.oauth   # add Client ID + secret (gitignored)
 npm test
 npm run pack
 ```
 
 Upload `dist/job-tracker-<version>.zip` in the
 [Chrome Developer Dashboard](https://chrome.google.com/webstore/devconsole).
-See [`store/README.md`](store/README.md) for listing assets and OAuth/privacy notes.
+See [`store/README.md`](store/README.md) for listing assets and privacy notes.
 
 Load unpacked still uses this repo folder (with the local `"key"` in
 `manifest.json`). The pack script strips that key for the store ZIP only.

@@ -52,7 +52,7 @@ Split duties with **modules imported by that entry**, not a second worker.
 
 ## Placement rules
 
-- **Auth / tokens / OAuth** → `lib/google-auth.js` + `lib/storage.js`; session orchestration in `background/google-session.js`.
+- **Auth / tokens / OAuth** → `lib/google-auth.js` + `lib/oauth-config.js` + `lib/storage.js`; session orchestration in `background/google-session.js`. Published store credentials are injected at pack time (see `store/PUBLISHER_OAUTH.md`), not committed.
 - **Sheets read/write / headers** → `lib/sheets-api.js`; orchestration in `background/sheets-orchestrator.js`.
 - **Job page parsing** → `lib/job-extractor.js`; multi-frame collection via `GET_TAB_JOB_DATA` / `page-job-data.js`.
 - **Open/close sidebar** → `background/side-panel.js` only publishes `SIDE_PANEL_STATE`.

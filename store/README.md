@@ -34,13 +34,15 @@ Store icon: use `icons/icon128.png` (generated from the brand mark).
 ## Before first publish
 
 1. Bump `version` in `manifest.json` (must increase on every upload).
-2. Run `npm test` and `npm run pack`.
-3. Copy answers from [`LISTING_COPY.md`](LISTING_COPY.md) into the Privacy practices and Store listing tabs.
-4. In Google Cloud Console, set the OAuth client to **Production** (or keep
-   Testing with listed testers) and add the **store** extension ID redirect URI
-   once Chrome assigns an ID (`https://<EXTENSION_ID>.chromiumapp.org/`).
-5. Host a privacy policy URL (draft text is in `LISTING_COPY.md`).
+2. Complete [`PUBLISHER_OAUTH.md`](PUBLISHER_OAUTH.md) (Cloud project, OAuth client, redirect URI, `.env.oauth`).
+3. Run `npm test` and `npm run pack` (pack injects OAuth from `.env.oauth`).
+4. Host a privacy policy URL (draft text is in `LISTING_COPY.md`).
+5. Copy answers from [`LISTING_COPY.md`](LISTING_COPY.md) into the Privacy practices and Store listing tabs.
 6. Verify publisher contact email under Dashboard → Settings.
+7. After Chrome assigns a store extension ID, add  
+   `https://<STORE_EXTENSION_ID>.chromiumapp.org/`  
+   to the OAuth client's Authorized redirect URIs.
+8. Submit OAuth verification when ready for users beyond test accounts.
 
 ## Local vs store ID
 

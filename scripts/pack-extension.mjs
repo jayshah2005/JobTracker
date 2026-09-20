@@ -71,6 +71,72 @@ function writeStoreManifest(manifest) {
   );
 }
 
+/**
+ * Inject published OAuth client into staging oauth-config.js.
+ * Reads JT_OAUTH_CLIENT_ID / JT_OAUTH_CLIENT_SECRET from the environment
+ * or from .env.oauth in the repo root (KEY=value lines).
+ */
+function injectPublishedOAuth() {
+  const env = { ...process.env, ...readDotEnv(join(ROOT, '.env.oauth')) };
+  const clientId = String(env.JT_OAUTH_CLIENT_ID || '').trim();
+  const clientSecret = String(env.JT_OAUTH_CLIENT_SECRET || '').trim();
+
+  if (!clientId && !clientSecret) {
+    console.warn(
+      'pack-extension: no JT_OAUTH_CLIENT_ID/SECRET — ZIP will require BYO Cloud setup.'
+    );
+    return;
+  }
+  if (!clientId || !clientSecret) {
+    fail(
+      'Set both JT_OAUTH_CLIENT_ID and JT_OAUTH_CLIENT_SECRET (or both in .env.oauth).'
+    );
+  }
+  if (!/\.apps\.googleusercontent\.com$/i.test(clientId)) {
+    fail('JT_OAUTH_CLIENT_ID must end with .apps.googleusercontent.com');
+  }
+
+  const configPath = join(STAGING, 'lib', 'oauth-config.js');
+  let source = readFileSync(configPath, 'utf8');
+  source = source.replace(
+    /export const DEFAULT_OAUTH_CLIENT_ID = '';/,
+    `export const DEFAULT_OAUTH_CLIENT_ID = ${JSON.stringify(clientId)};`
+  );
+  source = source.replace(
+    /export const DEFAULT_OAUTH_CLIENT_SECRET = '';/,
+    `export const DEFAULT_OAUTH_CLIENT_SECRET = ${JSON.stringify(clientSecret)};`
+  );
+  if (
+    !source.includes(JSON.stringify(clientId)) ||
+    !source.includes(JSON.stringify(clientSecret))
+  ) {
+    fail('Could not inject OAuth defaults into oauth-config.js (pattern mismatch).');
+  }
+  writeFileSync(configPath, source, 'utf8');
+  console.log('pack-extension: injected published OAuth client into store ZIP');
+}
+
+function readDotEnv(path) {
+  if (!existsSync(path)) return {};
+  const out = {};
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 function copyRuntimeTree() {
   for (const dir of DIRS) {
     const src = join(ROOT, dir);
@@ -114,6 +180,7 @@ function main() {
 
   copyRuntimeTree();
   pruneIcons();
+  injectPublishedOAuth();
   writeStoreManifest(manifest);
 
   const { zipName, zipPath } = zipPackage(version);

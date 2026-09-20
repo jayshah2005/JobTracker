@@ -19,6 +19,8 @@ import {
   sheetsAccessError,
   SIGN_IN_REQUIRED,
   effectiveClientId,
+  effectiveClientSecret,
+  hasPublishedOAuthDefaults,
   isValidClientId,
   isAccessTokenFresh,
   buildGoogleAuthUrl,
@@ -37,10 +39,15 @@ async function resolveClientId() {
   return effectiveClientId(await getOAuthClientId());
 }
 
+async function resolveClientSecret() {
+  return effectiveClientSecret(await getOAuthClientSecret());
+}
+
 export async function getOauthSetup() {
-  const stored = await getOAuthClientId();
-  const clientId = effectiveClientId(stored);
-  const clientSecret = await getOAuthClientSecret();
+  const storedId = await getOAuthClientId();
+  const storedSecret = await getOAuthClientSecret();
+  const clientId = effectiveClientId(storedId);
+  const clientSecret = effectiveClientSecret(storedSecret);
   const token = await getGoogleToken();
   return {
     success: true,
@@ -48,6 +55,8 @@ export async function getOauthSetup() {
     clientId,
     hasSecret: Boolean(clientSecret),
     needsSetup: !clientId || !clientSecret,
+    usingPublishedOAuth: hasPublishedOAuthDefaults(),
+    usingCustomClient: Boolean(String(storedId || '').trim()),
     signedIn: isAccessTokenFresh(token),
   };
 }
@@ -75,6 +84,8 @@ export async function getAuthStatus() {
     needsSetup: setup.needsSetup,
     redirectUri: setup.redirectUri,
     clientId: setup.clientId,
+    usingPublishedOAuth: setup.usingPublishedOAuth,
+    usingCustomClient: setup.usingCustomClient,
   };
 }
 
@@ -96,7 +107,7 @@ async function requestGoogleToken(interactive) {
     throw new Error('Finish Google connection in Job Tracker first (the extension shows the steps).');
   }
 
-  const clientSecret = await getOAuthClientSecret();
+  const clientSecret = await resolveClientSecret();
   const existing = await getGoogleToken();
 
   if (existing?.refreshToken) {
