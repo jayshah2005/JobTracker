@@ -5,11 +5,17 @@ export default {
   testMatch: ['**/tests/**/*.test.js'],
   collectCoverageFrom: ['lib/**/*.js'],
   projects: [
-    { displayName: 'node', testMatch: ['**/tests/!(job-extractor).test.js'] },
+    {
+      displayName: 'node',
+      testMatch: ['**/tests/!(job-extractor|extractors-ats).test.js'],
+    },
     {
       displayName: 'jsdom',
       testEnvironment: 'jsdom',
-      testMatch: ['**/tests/job-extractor.test.js'],
+      testMatch: [
+        '**/tests/job-extractor.test.js',
+        '**/tests/extractors-ats.test.js',
+      ],
       setupFiles: ['<rootDir>/tests/setup.js'],
     },
   ],

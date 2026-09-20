@@ -38,6 +38,7 @@ If placement is ambiguous, ask the user before inventing a new top-level folder.
 | Side panel chrome | `background/side-panel.js` | `chrome.sidePanel`, action click, `SIDE_PANEL_STATE` notify | Auth; Sheets; form UI |
 | Page job data | `background/page-job-data.js` | `GET_TAB_JOB_DATA` (frames + extract) | Sheets; side panel chrome |
 | Domain libs | `lib/*.js` | Auth helpers, Sheets HTTP, storage, extract, map, schema, duplicates | Extension UI markup; page injection chrome |
+| ATS extractors | `lib/extractors/*` | Site-specific job DOM/JSON pipelines; routed by `job-extractor.js` | Sheets; side panel; Chrome messaging |
 | Sidebar UI | `sidepanel/*` | Side panel HTML/CSS/JS, drafts, save form | Direct Sheets HTTP; `setOptions`; `executeScript` extract |
 | Page UI | `content/*` | Job-page detection, floating launcher, `GET_PAGE_JOB_DATA` reply | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
 | Settings | `options/*` | Settings UI; use `lib/storage` for prefs | Background chrome wiring; raw Sheets HTTP |

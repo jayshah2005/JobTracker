@@ -60,6 +60,7 @@
       "resources": [
         "content/floating-panel.css",
         "lib/*.js",
+        "lib/extractors/*.js",
         "icons/logo.png",
         "icons/icon16.png",
         "icons/icon32.png",
