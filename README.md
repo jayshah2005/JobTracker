@@ -40,6 +40,20 @@ If you’ve already saved that job, you’ll see **Already applied** and it won�
 | Autofill missing | Fill the field in the sidebar — some sites don’t expose job data. |
 | Panel doesn’t appear | Enable “Show Job Tracker button on job pages” in Settings. |
 
+## Publish (Chrome Web Store)
+
+```bash
+npm test
+npm run pack
+```
+
+Upload `dist/job-tracker-<version>.zip` in the
+[Chrome Developer Dashboard](https://chrome.google.com/webstore/devconsole).
+See [`store/README.md`](store/README.md) for listing assets and OAuth/privacy notes.
+
+Load unpacked still uses this repo folder (with the local `"key"` in
+`manifest.json`). The pack script strips that key for the store ZIP only.
+
 ## License
 
 MIT

@@ -1,11 +1,12 @@
 {
   "name": "job-tracker-extension",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "description": "Browser extension to track job applications in Google Sheets",
   "type": "module",
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "test:watch": "npm test -- --watch"
+    "test:watch": "npm test -- --watch",
+    "pack": "node scripts/pack-extension.mjs"
   },
   "devDependencies": {
     "jest": "^29.7.0",
