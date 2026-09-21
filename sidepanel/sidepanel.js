@@ -68,7 +68,6 @@ async function init() {
     chrome.runtime.openOptionsPage();
   };
   $('#open-options').addEventListener('click', openSettings);
-  $('#tab-settings')?.addEventListener('click', openSettings);
   $('#collapse-panel')?.addEventListener('click', collapseSidePanel);
 
   $('#sign-in-btn').addEventListener('click', handleSignIn);
