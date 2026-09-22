@@ -40,8 +40,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px 8px;
+  padding: 12px 14px;
   background: #fff;
+  border-bottom: 1px solid var(--jt-border);
 }
 
 .sp-brand {
@@ -90,6 +91,38 @@ body {
   background: #f3f4f6;
 }
 
+.sp-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--jt-border);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--jt-text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sp-settings-btn svg {
+  flex-shrink: 0;
+  color: var(--jt-muted);
+}
+
+.sp-settings-btn:hover {
+  background: var(--jt-primary-soft);
+  border-color: #bfdbfe;
+  color: var(--jt-primary);
+}
+
+.sp-settings-btn:hover svg {
+  color: var(--jt-primary);
+}
+
 .auth-pill {
   font-size: 10px;
   font-weight: 700;
@@ -100,46 +133,6 @@ body {
   padding: 3px 7px;
   border-radius: 999px;
   border: 1px solid #a7f3d0;
-}
-
-.sp-tabs {
-  flex-shrink: 0;
-  display: flex;
-  gap: 4px;
-  padding: 0 12px 10px;
-  border-bottom: 1px solid var(--jt-border);
-  background: #fff;
-}
-
-.sp-tab {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--jt-muted);
-  font-size: 12px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.sp-tab:hover {
-  background: #f9fafb;
-  color: var(--jt-text);
-}
-
-.sp-tab.is-active {
-  background: var(--jt-primary-soft);
-  color: var(--jt-primary);
-}
-
-.sp-tab.is-active svg {
-  stroke: var(--jt-primary);
 }
 
 .sp-main {
