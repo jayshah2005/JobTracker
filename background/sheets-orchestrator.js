@@ -10,6 +10,7 @@ import {
   updateJobInTab,
   fetchSpreadsheetMetadata,
   syncTabHeaders,
+  renameSheetTab,
   rowIndexFromUpdatedRange,
 } from '../lib/sheets-api.js';
 import { parseGoogleSheetUrl } from '../lib/sheet-url.js';
@@ -112,12 +113,72 @@ export async function removeSheet(spreadsheetId) {
   return { success: true, sheets };
 }
 
+/**
+ * Rename a worksheet tab in Google Sheets and persist the new title locally.
+ */
+export async function renameTab({ spreadsheetId, tabId, title }) {
+  const nextTitle = String(title || '').trim();
+  if (!nextTitle) {
+    return { success: false, error: 'Tab name cannot be empty.' };
+  }
+
+  try {
+    return await withSheetAccess(async (token) => {
+      const sheets = await getConfiguredSheets();
+      const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
+      if (!sheet) {
+        return { success: false, error: 'Spreadsheet not found.' };
+      }
+
+      const tab = (sheet.tabs || []).find(
+        (t) => String(t.gid) === String(tabId) || String(t.tabId) === String(tabId)
+      );
+      if (!tab) {
+        return { success: false, error: 'Sheet tab not found.' };
+      }
+
+      const duplicate = (sheet.tabs || []).some(
+        (t) =>
+          String(t.gid) !== String(tab.gid) &&
+          String(t.tabName || '').toLowerCase() === nextTitle.toLowerCase()
+      );
+      if (duplicate) {
+        return { success: false, error: 'Another tab already uses that name.' };
+      }
+
+      if (tab.tabName === nextTitle) {
+        return { success: true, sheets, tab };
+      }
+
+      const sheetIdForApi = tab.sheetId ?? tab.gid;
+      await renameSheetTab(spreadsheetId, sheetIdForApi, nextTitle, token);
+
+      // Re-read before write so an in-flight sync cannot drop this rename.
+      const latest = await getConfiguredSheets();
+      const latestSheet = latest.find((s) => s.spreadsheetId === spreadsheetId);
+      const latestTab = (latestSheet?.tabs || []).find(
+        (t) => String(t.gid) === String(tab.gid) || String(t.tabId) === String(tab.gid)
+      );
+      if (!latestSheet || !latestTab) {
+        return { success: false, error: 'Sheet tab not found after rename.' };
+      }
+
+      latestTab.tabName = nextTitle;
+      await saveConfiguredSheets(latest);
+      return { success: true, sheets: latest, tab: latestTab };
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function refreshAllSheets() {
   return withSheetAccess(async (token) => {
     const sheets = await getConfiguredSheets();
     const updated = [];
 
     for (const sheet of sheets) {
+      const meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
       const rawTabs = await loadSpreadsheetTabs(sheet.spreadsheetId, token);
       const tabs = rawTabs.map((t) => {
         const config = prepareTabConfig(
@@ -139,7 +200,14 @@ export async function refreshAllSheets() {
           rowCount: t.rows.length,
         };
       });
-      updated.push({ ...sheet, tabs });
+      updated.push({
+        ...sheet,
+        name:
+          meta.properties?.title ||
+          sheet.name ||
+          `Sheet ${sheet.spreadsheetId.slice(0, 8)}…`,
+        tabs,
+      });
     }
 
     await saveConfiguredSheets(updated);
@@ -288,12 +356,32 @@ export async function syncTabColumnUniques(message) {
       autoApplyEmptyDropdowns,
       applyColumnIndex,
     });
-    await saveConfiguredSheets(sheets);
+
+    // Merge into the latest stored sheets so concurrent renames aren't clobbered.
+    const latest = await getConfiguredSheets();
+    const latestSheet = latest.find((s) => s.spreadsheetId === spreadsheetId);
+    const latestTab = latestSheet?.tabs?.find(
+      (t) => t.tabId === tabId || t.gid === tabId
+    );
+    if (!latestTab) {
+      return { success: false, error: 'Tab not found' };
+    }
+
+    latestTab.columnUniques = tab.columnUniques;
+    latestTab.mappings = tab.mappings;
+    // Keep latestTab.tabName / headers from storage (rename-safe).
+    await saveConfiguredSheets(latest);
+
     const fromSheet =
       columnIndex == null
-        ? tab.columnUniques || []
-        : tab.columnUniques?.[columnIndex] || [];
-    return { success: true, sheets, fromSheet, columnUniques: tab.columnUniques };
+        ? latestTab.columnUniques || []
+        : latestTab.columnUniques?.[columnIndex] || [];
+    return {
+      success: true,
+      sheets: latest,
+      fromSheet,
+      columnUniques: latestTab.columnUniques,
+    };
   } catch (err) {
     return { success: false, error: err.message };
   }

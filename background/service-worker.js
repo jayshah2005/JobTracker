@@ -19,6 +19,7 @@ import {
   undoSchemaChange,
   findApplication,
   saveJob,
+  renameTab,
 } from './sheets-orchestrator.js';
 import { getConfiguredSheets, getSettings, saveSettings, getUndoStack } from '../lib/storage.js';
 import {
@@ -58,6 +59,8 @@ async function handleMessage(message, sender) {
       return addSheet(message.url);
     case 'REMOVE_SHEET':
       return removeSheet(message.spreadsheetId);
+    case 'RENAME_SHEET_TAB':
+      return renameTab(message);
     case 'REFRESH_SHEETS':
       return refreshAllSheets();
     case 'GET_SHEETS':
