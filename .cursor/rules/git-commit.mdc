@@ -24,6 +24,7 @@ Only commit / push / create branches when the user explicitly asks. Never commit
 | Scope | Use for |
 |-------|---------|
 | `sidepanel` | Side panel, options, connect UI, content scripts, branding surfaces |
+| `settings` | Any changes in the settings menu that are UI related or not covered by the other scopes |
 | `auth` | OAuth, tokens, connect/sign-in flow, Google session |
 | `docs` | README, store listing copy, publisher/setup docs (`chore/docs`) |
 | `engine` | Extraction, Sheets API, field mapping, background orchestration, lib core |

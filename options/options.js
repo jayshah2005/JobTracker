@@ -14,9 +14,65 @@ let settings = {};
 let undoStack = [];
 /** Remember which dropdown editors the user expanded. */
 const openDropdownEditors = new Set();
+/** Active spreadsheet + worksheet tab selections (survive re-renders). */
+let activeSpreadsheetId = null;
+const activeWorksheetBySheet = new Map();
+/** Pending single-click tab switch — cancelled when a double-click starts rename. */
+let pendingWorksheetClick = null;
+
+function bindWorksheetTab(btn, spreadsheetId) {
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('is-editing')) return;
+
+    // Already selected: do not re-render, or dblclick never reaches this node.
+    if (btn.classList.contains('is-active')) return;
+
+    clearTimeout(pendingWorksheetClick);
+    const gid = btn.dataset.selectWorksheet;
+    pendingWorksheetClick = setTimeout(() => {
+      pendingWorksheetClick = null;
+      activeWorksheetBySheet.set(spreadsheetId, gid);
+      renderSheetList();
+    }, 280);
+  });
+
+  btn.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(pendingWorksheetClick);
+    pendingWorksheetClick = null;
+    activeWorksheetBySheet.set(spreadsheetId, btn.dataset.selectWorksheet);
+    beginWorksheetRename(btn);
+  });
+}
 
 function dropdownEditorKey(sheetId, tabId, col) {
   return `${sheetId}:${tabId}:${col}`;
+}
+
+function ensureActiveSelections() {
+  if (!sheets.length) {
+    activeSpreadsheetId = null;
+    activeWorksheetBySheet.clear();
+    return null;
+  }
+
+  if (!sheets.some((s) => s.spreadsheetId === activeSpreadsheetId)) {
+    activeSpreadsheetId = sheets[0].spreadsheetId;
+  }
+
+  const sheet = sheets.find((s) => s.spreadsheetId === activeSpreadsheetId);
+  const tabs = sheet?.tabs || [];
+  if (!tabs.length) {
+    activeWorksheetBySheet.delete(activeSpreadsheetId);
+    return { sheet, tab: null };
+  }
+
+  const currentGid = activeWorksheetBySheet.get(activeSpreadsheetId);
+  const tab =
+    tabs.find((t) => String(t.gid) === String(currentGid)) || tabs[0];
+  activeWorksheetBySheet.set(activeSpreadsheetId, tab.gid);
+  return { sheet, tab };
 }
 
 async function init() {
@@ -183,6 +239,11 @@ async function handleAddSheet() {
     const res = await sendMessage({ type: 'ADD_SHEET', url });
     if (res.success) {
       sheets = res.sheets;
+      if (res.sheet?.spreadsheetId) {
+        activeSpreadsheetId = res.sheet.spreadsheetId;
+      } else if (sheets.length) {
+        activeSpreadsheetId = sheets[sheets.length - 1].spreadsheetId;
+      }
       $('#sheet-url').value = '';
       renderSheetList();
       showStatus('Sheet added successfully!', 'success');
@@ -240,12 +301,51 @@ function renderSheetList() {
   const container = $('#sheet-list');
 
   if (sheets.length === 0) {
+    activeSpreadsheetId = null;
+    activeWorksheetBySheet.clear();
     container.innerHTML =
       '<div class="empty-state card"><p>No sheets connected yet. Paste a Google Sheets link above to get started.</p></div>';
     return;
   }
 
-  container.innerHTML = sheets.map((sheet) => renderSheetCard(sheet)).join('');
+  const { sheet, tab } = ensureActiveSelections();
+  if (!sheet) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const sheetTabs = sheets
+    .map((s) => {
+      const selected = s.spreadsheetId === sheet.spreadsheetId;
+      return `
+      <button type="button" class="sheet-tab${selected ? ' is-active' : ''}"
+        role="tab"
+        aria-selected="${selected ? 'true' : 'false'}"
+        data-select-sheet="${s.spreadsheetId}"
+        title="${escapeHtml(s.name || 'Spreadsheet')}">
+        ${escapeHtml(s.name || 'Spreadsheet')}
+      </button>`;
+    })
+    .join('');
+
+  container.innerHTML = `
+    <div class="sheet-workspace">
+      <div class="sheet-tabs" role="tablist" aria-label="Connected spreadsheets">
+        ${sheetTabs}
+      </div>
+      ${renderSheetPanel(sheet, tab)}
+    </div>`;
+
+  container.querySelectorAll('[data-select-sheet]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activeSpreadsheetId = btn.dataset.selectSheet;
+      renderSheetList();
+    });
+  });
+
+  container.querySelectorAll('[data-select-worksheet]').forEach((btn) => {
+    bindWorksheetTab(btn, sheet.spreadsheetId);
+  });
 
   container.querySelectorAll('[data-remove-sheet]').forEach((btn) => {
     btn.addEventListener('click', () => handleRemoveSheet(btn.dataset.removeSheet));
@@ -312,6 +412,165 @@ function renderSheetList() {
   });
 }
 
+function renderSheetPanel(sheet, tab) {
+  const worksheets = sheet.tabs || [];
+  const worksheetTabs = worksheets
+    .map((t) => {
+      const selected = tab && String(t.gid) === String(tab.gid);
+      const name = t.tabName || 'Untitled sheet';
+      return `
+      <button type="button" class="worksheet-tab${selected ? ' is-active' : ''}"
+        role="tab"
+        aria-selected="${selected ? 'true' : 'false'}"
+        data-select-worksheet="${t.gid}"
+        data-sheet="${sheet.spreadsheetId}"
+        title="${escapeHtml(name)} — double-click to rename">
+        <span class="worksheet-tab-label">${escapeHtml(name)}</span>
+      </button>`;
+    })
+    .join('');
+
+  const body = tab
+    ? renderTabMappings(sheet, tab)
+    : `<div class="empty-state"><p>This spreadsheet has no tabs yet.</p></div>`;
+
+  const sheetTitle = sheet.name || 'Spreadsheet';
+  const sheetUrl = sheet.url || '';
+
+  return `
+    <div class="sheet-panel">
+      <div class="sheet-panel-toolbar">
+        <div class="sheet-panel-title-row">
+          <h2 class="sheet-panel-title" title="${escapeHtml(sheetTitle)}">${escapeHtml(sheetTitle)}</h2>
+          <button type="button" class="btn btn-danger btn-sm" data-remove-sheet="${sheet.spreadsheetId}">Remove</button>
+        </div>
+        ${
+          sheetUrl
+            ? `<a class="sheet-panel-url" href="${escapeHtml(sheetUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sheetUrl)}</a>`
+            : ''
+        }
+      </div>
+      <div class="worksheet-tabs" role="tablist" aria-label="Spreadsheet tabs">
+        ${worksheetTabs}
+      </div>
+      <p class="worksheet-hint">Showing real Google Sheet tab names. Double-click a tab to rename it.</p>
+      <div class="worksheet-panel">${body}</div>
+    </div>`;
+}
+
+function beginWorksheetRename(tabBtn) {
+  if (tabBtn.classList.contains('is-editing')) return;
+
+  const spreadsheetId = tabBtn.dataset.sheet;
+  const tabId = tabBtn.dataset.selectWorksheet;
+  const label = tabBtn.querySelector('.worksheet-tab-label');
+  const currentName = (label?.textContent || tabBtn.textContent || '').trim();
+  const wasActive = tabBtn.classList.contains('is-active');
+
+  // Never nest an <input> inside <button> — Enter activates the button and
+  // aborts/races the save. Replace the tab with a non-button editor host.
+  const host = document.createElement('div');
+  host.className = `worksheet-tab is-editing${wasActive ? ' is-active' : ''}`;
+  host.setAttribute('role', 'tab');
+  host.dataset.sheet = spreadsheetId;
+  host.dataset.selectWorksheet = tabId;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'worksheet-tab-input';
+  input.value = currentName;
+  input.setAttribute('aria-label', 'Rename sheet tab');
+  input.maxLength = 100;
+  host.appendChild(input);
+  tabBtn.replaceWith(host);
+
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
+
+  let finished = false;
+  let blurTimer = null;
+
+  const teardownBlur = () => {
+    input.removeEventListener('blur', onBlur);
+    if (blurTimer) {
+      clearTimeout(blurTimer);
+      blurTimer = null;
+    }
+  };
+
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    teardownBlur();
+
+    const next = input.value.trim();
+    if (!save || !next || next === currentName) {
+      renderSheetList();
+      return;
+    }
+
+    // Optimistic local update so the UI doesn't snap back if a background
+    // sync response arrives mid-rename.
+    const localSheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
+    const localTab = localSheet?.tabs?.find(
+      (t) => String(t.gid) === String(tabId) || String(t.tabId) === String(tabId)
+    );
+    if (localTab) localTab.tabName = next;
+    activeWorksheetBySheet.set(spreadsheetId, tabId);
+    input.disabled = true;
+
+    try {
+      const res = await sendMessage({
+        type: 'RENAME_SHEET_TAB',
+        spreadsheetId,
+        tabId,
+        title: next,
+      });
+
+      if (res?.success && res.sheets) {
+        sheets = res.sheets;
+        activeWorksheetBySheet.set(spreadsheetId, tabId);
+        renderSheetList();
+        showStatus(`Renamed tab to “${next}”.`, 'success');
+        return;
+      }
+
+      if (localTab) localTab.tabName = currentName;
+      renderSheetList();
+      showStatus(res?.error || 'Could not rename tab.', 'error');
+    } catch (err) {
+      if (localTab) localTab.tabName = currentName;
+      renderSheetList();
+      showStatus(err.message || 'Could not rename tab.', 'error');
+    }
+  };
+
+  const onBlur = () => {
+    // Defer so Enter keydown can cancel blur and own the save.
+    blurTimer = setTimeout(() => finish(true), 0);
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      teardownBlur();
+      finish(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      teardownBlur();
+      finish(false);
+    }
+  });
+
+  input.addEventListener('blur', onBlur);
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('mousedown', (e) => e.stopPropagation());
+}
+
 async function maybeSyncOnOpen(detailsEl) {
   if (detailsEl.dataset.synced === '1') return;
   const spreadsheetId = detailsEl.dataset.sheet;
@@ -343,22 +602,6 @@ async function maybeSyncOnOpen(detailsEl) {
       showStatus(`Loaded ${count} choice${count === 1 ? '' : 's'} from the sheet column.`, 'success');
     }
   }
-}
-
-function renderSheetCard(sheet) {
-  const tabs = (sheet.tabs || []).map((tab) => renderTabMappings(sheet, tab)).join('');
-
-  return `
-    <div class="sheet-card">
-      <div class="sheet-card-header">
-        <div>
-          <div class="title">${escapeHtml(sheet.name || 'Spreadsheet')}</div>
-          <div class="url">${escapeHtml(sheet.url)}</div>
-        </div>
-        <button class="btn btn-danger btn-sm" data-remove-sheet="${sheet.spreadsheetId}">Remove</button>
-      </div>
-      <div class="tab-list">${tabs}</div>
-    </div>`;
 }
 
 function renderTabMappings(sheet, tab) {
@@ -534,9 +777,8 @@ function renderTabMappings(sheet, tab) {
     : `<span class="badge">${tab.rowCount ?? 0} rows</span>`;
 
   return `
-    <div class="tab-item">
-      <div class="tab-item-header">
-        <span class="tab-name">Tab: ${escapeHtml(tab.tabName)}</span>
+    <div class="worksheet-body">
+      <div class="worksheet-body-header">
         ${badge}
       </div>
       <p class="field-hint schema-hint">
@@ -1080,8 +1322,15 @@ function showStatus(msg, type) {
 }
 
 function sendMessage(msg) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(msg, resolve);
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(msg, (res) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(res);
+    });
   });
 }
 
