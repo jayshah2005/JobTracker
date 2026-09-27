@@ -82,7 +82,7 @@ async function init() {
   });
 
   $('#save-btn').addEventListener('click', handleSave);
-  $('#destination-picker').addEventListener('change', onDestinationChange);
+  bindDestinationCombo();
   $('#edit-existing-btn')?.addEventListener('click', () => {
     startEditingExisting().catch((err) => showStatus(err.message, 'error'));
   });
@@ -288,9 +288,15 @@ async function handleAddSheet() {
   }
 }
 
+function destinationLabel(d) {
+  if (!d) return '';
+  return `${d.sheetName || 'Spreadsheet'} → ${d.tabName || 'Sheet'}`;
+}
+
 function setupDestinationPicker(preferredKey = null) {
   const section = $('#destination-section');
-  const picker = $('#destination-picker');
+  const combo = $('#destination-combo');
+  const input = $('#destination-picker-input');
 
   if (!shouldShowDestinationPicker(sheets)) {
     section.classList.add('hidden');
@@ -299,12 +305,6 @@ function setupDestinationPicker(preferredKey = null) {
   }
 
   section.classList.remove('hidden');
-  picker.innerHTML = destinations
-    .map(
-      (d, i) =>
-        `<option value="${i}">${escapeHtml(d.sheetName)} → ${escapeHtml(d.tabName)}</option>`
-    )
-    .join('');
 
   let idx = 0;
   if (preferredKey) {
@@ -313,15 +313,157 @@ function setupDestinationPicker(preferredKey = null) {
     );
     if (found >= 0) idx = found;
   }
-  picker.value = String(idx);
   selectedDestination = destinations[idx] || destinations[0] || null;
+
+  if (input) {
+    const label = destinationLabel(selectedDestination);
+    input.value = label;
+    input.dataset.committed = label;
+    input.dataset.index = String(idx);
+  }
+  if (combo) {
+    combo.dataset.index = String(idx);
+    combo.classList.toggle('is-disabled', false);
+  }
 }
 
-function onDestinationChange() {
-  const idx = parseInt($('#destination-picker').value, 10);
-  selectedDestination = destinations[idx];
+function onDestinationChange(idx) {
+  const next = destinations[idx];
+  if (!next) return;
+  selectedDestination = next;
+  const input = $('#destination-picker-input');
+  const combo = $('#destination-combo');
+  const label = destinationLabel(next);
+  if (input) {
+    input.value = label;
+    input.dataset.committed = label;
+    input.dataset.index = String(idx);
+  }
+  if (combo) combo.dataset.index = String(idx);
   renderDynamicFields({ preferExistingInputs: true });
   saveDraft();
+}
+
+/**
+ * Closed searchable destination picker (text dropdown, no free-form values).
+ */
+function bindDestinationCombo() {
+  const root = $('#destination-combo');
+  const input = $('#destination-picker-input');
+  const menu = root?.querySelector('.combo-menu');
+  const caret = root?.querySelector('.combo-caret');
+  if (!root || !input || !menu) return;
+
+  let open = false;
+  let suppressBlur = false;
+
+  const currentIndex = () => {
+    const fromData = parseInt(input.dataset.index ?? root.dataset.index, 10);
+    if (Number.isFinite(fromData) && destinations[fromData]) return fromData;
+    return Math.max(
+      0,
+      destinations.findIndex(
+        (d) =>
+          selectedDestination &&
+          d.sheetId === selectedDestination.sheetId &&
+          String(d.gid) === String(selectedDestination.gid)
+      )
+    );
+  };
+
+  const renderMenu = (query = '') => {
+    const q = String(query || '').trim().toLowerCase();
+    const items = destinations
+      .map((d, i) => ({ d, i, label: destinationLabel(d) }))
+      .filter((item) => !q || item.label.toLowerCase().includes(q));
+
+    if (!items.length) {
+      menu.innerHTML = `<li class="combo-empty">No matching destinations</li>`;
+      return;
+    }
+
+    const selectedIdx = currentIndex();
+    menu.innerHTML = items
+      .map(({ i, label }) => {
+        const selected = i === selectedIdx ? ' is-selected' : '';
+        return `
+          <li class="combo-item${selected}" role="option">
+            <button type="button" class="combo-pick" data-pick="${i}">${escapeHtml(label)}</button>
+          </li>`;
+      })
+      .join('');
+  };
+
+  const openMenu = ({ reset = false } = {}) => {
+    if (root.classList.contains('is-disabled') || input.disabled) return;
+    open = true;
+    root.classList.add('is-open');
+    input.setAttribute('aria-expanded', 'true');
+    menu.classList.remove('hidden');
+    if (reset) {
+      input.value = '';
+      renderMenu('');
+    } else {
+      renderMenu(input.value === input.dataset.committed ? '' : input.value);
+    }
+  };
+
+  const closeMenu = ({ restore = false } = {}) => {
+    open = false;
+    root.classList.remove('is-open');
+    input.setAttribute('aria-expanded', 'false');
+    menu.classList.add('hidden');
+    if (restore) input.value = input.dataset.committed || '';
+  };
+
+  const pickIndex = (idx) => {
+    onDestinationChange(idx);
+    closeMenu();
+  };
+
+  input.addEventListener('focus', () => openMenu({ reset: true }));
+  input.addEventListener('click', () => {
+    if (!open) openMenu({ reset: true });
+  });
+  caret?.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (open) closeMenu({ restore: true });
+    else {
+      input.focus();
+      openMenu({ reset: true });
+    }
+  });
+  input.addEventListener('input', () => {
+    if (!open) openMenu();
+    else renderMenu(input.value);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMenu({ restore: true });
+      input.blur();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const first = menu.querySelector('.combo-pick');
+      if (first) pickIndex(parseInt(first.dataset.pick, 10));
+      else closeMenu({ restore: true });
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) openMenu({ reset: true });
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (suppressBlur) return;
+    setTimeout(() => closeMenu({ restore: true }), 120);
+  });
+  menu.addEventListener('mousedown', (e) => {
+    const pick = e.target.closest('[data-pick]');
+    if (!pick) return;
+    e.preventDefault();
+    suppressBlur = true;
+    pickIndex(parseInt(pick.dataset.pick, 10));
+    suppressBlur = false;
+  });
 }
 
 function renderApplied() {
@@ -390,12 +532,17 @@ function renderEditChrome() {
   const editing = isEditingExisting();
   const banner = $('#editing-banner');
   const lockedHint = $('#destination-locked-hint');
-  const picker = $('#destination-picker');
+  const combo = $('#destination-combo');
+  const input = $('#destination-picker-input');
   const label = $('#save-btn-label');
 
   banner?.classList.toggle('hidden', !editing);
   lockedHint?.classList.toggle('hidden', !editing);
-  if (picker) picker.disabled = editing;
+  if (combo) combo.classList.toggle('is-disabled', editing);
+  if (input) {
+    input.disabled = editing;
+    input.setAttribute('aria-disabled', editing ? 'true' : 'false');
+  }
 
   if (editing && existingMatch) {
     const when = existingMatch.dateApplied

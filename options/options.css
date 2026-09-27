@@ -773,11 +773,22 @@ body {
   color: var(--jt-muted);
 }
 
-.dd-default-select {
+.dd-default-combo {
   flex: 1;
-  margin-bottom: 0 !important;
-  font-size: 12px;
-  padding: 5px 8px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.dd-default-combo .combo-input {
+  font-size: 12px !important;
+  padding: 5px 26px 5px 8px !important;
+}
+
+.combo.is-disabled,
+.combo.is-disabled .combo-input {
+  opacity: 0.65;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .dd-add {

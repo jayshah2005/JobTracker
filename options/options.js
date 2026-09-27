@@ -356,6 +356,7 @@ function renderSheetList() {
   });
 
   bindTagComboboxes(container);
+  bindDefaultComboboxes(container);
 
   container.querySelectorAll('[data-col-action]').forEach((btn) => {
     btn.addEventListener('click', onColumnAction);
@@ -383,10 +384,6 @@ function renderSheetList() {
 
   container.querySelectorAll('[data-refresh-column-uniques]').forEach((btn) => {
     btn.addEventListener('click', onRefreshColumnUniques);
-  });
-
-  container.querySelectorAll('[data-dropdown-default]').forEach((select) => {
-    select.addEventListener('change', onDropdownDefaultChange);
   });
 
   container.querySelectorAll('details.dd-editor').forEach((el) => {
@@ -651,14 +648,14 @@ function renderTabMappings(sheet, tab) {
         m.dropdownDefault
       );
       const defaultOptions = [
-        `<option value="">No default</option>`,
-        ...options.map(
-          (opt) =>
-            `<option value="${escapeHtml(opt)}" ${
-              opt === defaultValue ? 'selected' : ''
-            }>${escapeHtml(opt)}</option>`
-        ),
-      ].join('');
+        { value: '', label: 'No default' },
+        ...options.map((opt) => ({ value: opt, label: opt })),
+      ];
+      const defaultEncoded = encodeURIComponent(JSON.stringify(defaultOptions));
+      const defaultLabel =
+        defaultOptions.find((o) => o.value === defaultValue)?.label ||
+        'No default';
+      const defaultDisabled = options.length ? '' : 'is-disabled';
 
       const countLabel =
         options.length === 0
@@ -714,15 +711,29 @@ function renderTabMappings(sheet, tab) {
                 ${fromSheetBlock}
                 <div class="dd-default-row">
                   <label class="dd-default-label" for="dd-default-${sheet.spreadsheetId}-${tab.gid}-${m.columnIndex}">Default value</label>
-                  <select id="dd-default-${sheet.spreadsheetId}-${tab.gid}-${m.columnIndex}"
-                    class="dd-default-select"
-                    data-dropdown-default
+                  <div class="combo combo--compact dd-default-combo ${defaultDisabled}"
+                    data-default-combo
                     data-sheet="${sheet.spreadsheetId}"
                     data-tab="${tab.gid}"
                     data-col="${m.columnIndex}"
-                    ${options.length ? '' : 'disabled'}>
-                    ${defaultOptions}
-                  </select>
+                    data-value="${escapeHtml(defaultValue)}"
+                    data-options="${defaultEncoded}">
+                    <div class="combo-control">
+                      <input type="text" id="dd-default-${sheet.spreadsheetId}-${tab.gid}-${m.columnIndex}"
+                        class="combo-input"
+                        value="${escapeHtml(defaultLabel)}"
+                        data-committed="${escapeHtml(defaultLabel)}"
+                        placeholder="Search defaults…"
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-autocomplete="list"
+                        aria-expanded="false"
+                        role="combobox"
+                        ${options.length ? '' : 'disabled'} />
+                      <button type="button" class="combo-caret" tabindex="-1" aria-label="Show default values"></button>
+                    </div>
+                    <ul class="combo-menu hidden" role="listbox"></ul>
+                  </div>
                 </div>
                 <div class="dd-add">
                   <input type="text" class="dropdown-option-input"
@@ -1000,6 +1011,164 @@ function bindTagComboboxes(container) {
   });
 }
 
+/**
+ * Searchable default-value picker for Custom Dropdown columns.
+ */
+function bindDefaultComboboxes(container) {
+  container.querySelectorAll('[data-default-combo]').forEach((root) => {
+    const input = root.querySelector('.combo-input');
+    const menu = root.querySelector('.combo-menu');
+    const caret = root.querySelector('.combo-caret');
+    if (!input || !menu || input.disabled) return;
+
+    let options = [];
+    try {
+      options = JSON.parse(decodeURIComponent(root.dataset.options || '')) || [];
+    } catch {
+      options = [{ value: '', label: 'No default' }];
+    }
+
+    let committedValue = root.dataset.value || '';
+    let committedLabel =
+      options.find((o) => o.value === committedValue)?.label ||
+      input.value ||
+      'No default';
+    let open = false;
+    let suppressBlur = false;
+
+    const setCommitted = (value, label) => {
+      committedValue = value;
+      committedLabel = label;
+      root.dataset.value = value;
+      input.dataset.committed = label;
+      input.value = label;
+    };
+
+    const renderMenu = (query = '') => {
+      const q = String(query || '').trim().toLowerCase();
+      const filtered = q
+        ? options.filter((o) => o.label.toLowerCase().includes(q))
+        : options.slice();
+
+      if (!filtered.length) {
+        menu.innerHTML = `<li class="combo-empty">No matching defaults</li>`;
+        return;
+      }
+
+      menu.innerHTML = filtered
+        .map((opt) => {
+          const selected = opt.value === committedValue ? ' is-selected' : '';
+          return `
+            <li class="combo-item${selected}" role="option">
+              <button type="button" class="combo-pick" data-pick="${escapeHtml(opt.value)}" data-label="${escapeHtml(opt.label)}">
+                ${escapeHtml(opt.label)}
+              </button>
+            </li>`;
+        })
+        .join('');
+    };
+
+    const openMenu = ({ reset = false } = {}) => {
+      if (root.classList.contains('is-disabled')) return;
+      open = true;
+      root.classList.add('is-open');
+      input.setAttribute('aria-expanded', 'true');
+      menu.classList.remove('hidden');
+      if (reset) {
+        input.value = '';
+        renderMenu('');
+      } else {
+        renderMenu(input.value);
+      }
+    };
+
+    const closeMenu = ({ restore = false } = {}) => {
+      open = false;
+      root.classList.remove('is-open');
+      input.setAttribute('aria-expanded', 'false');
+      menu.classList.add('hidden');
+      if (restore) input.value = committedLabel;
+    };
+
+    const pickValue = async (value, label) => {
+      const spreadsheetId = root.dataset.sheet;
+      const tabId = root.dataset.tab;
+      const columnIndex = parseInt(root.dataset.col, 10);
+      const prev = committedValue;
+      setCommitted(value, label);
+      closeMenu();
+      if (value === prev) return;
+
+      const mapping = getMapping(spreadsheetId, tabId, columnIndex);
+      const dropdownOptions = normalizeDropdownOptions(mapping?.dropdownOptions);
+      await saveDropdownOptions(
+        spreadsheetId,
+        tabId,
+        columnIndex,
+        dropdownOptions,
+        value
+      );
+    };
+
+    input.addEventListener('focus', () => openMenu({ reset: true }));
+    input.addEventListener('click', () => {
+      if (!open) openMenu({ reset: true });
+      else if (input.value !== '') openMenu({ reset: true });
+    });
+
+    caret?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      suppressBlur = true;
+      if (open) closeMenu({ restore: true });
+      else {
+        input.focus();
+        openMenu({ reset: true });
+      }
+      setTimeout(() => {
+        suppressBlur = false;
+      }, 0);
+    });
+
+    input.addEventListener('input', () => {
+      if (!open) openMenu({ reset: false });
+      else renderMenu(input.value);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeMenu({ restore: true });
+        input.blur();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const first = menu.querySelector('.combo-pick');
+        if (first) pickValue(first.dataset.pick, first.dataset.label);
+        else closeMenu({ restore: true });
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!open) openMenu({ reset: true });
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      if (suppressBlur) return;
+      setTimeout(() => closeMenu({ restore: true }), 120);
+    });
+
+    menu.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      suppressBlur = true;
+    });
+
+    menu.addEventListener('click', (e) => {
+      const pickBtn = e.target.closest('[data-pick]');
+      if (!pickBtn) return;
+      pickValue(pickBtn.dataset.pick, pickBtn.dataset.label);
+      suppressBlur = false;
+    });
+  });
+}
+
 async function applyChange(spreadsheetId, tabId, change) {
   const destructive = isDestructiveOp(change.op);
   let confirmed = !destructive;
@@ -1091,22 +1260,6 @@ async function saveDropdownOptions(
     options,
     defaultValue: normalizeDropdownDefault(options, nextDefault),
   });
-}
-
-async function onDropdownDefaultChange(e) {
-  const select = e.currentTarget;
-  const spreadsheetId = select.dataset.sheet;
-  const tabId = select.dataset.tab;
-  const columnIndex = parseInt(select.dataset.col, 10);
-  const mapping = getMapping(spreadsheetId, tabId, columnIndex);
-  const options = normalizeDropdownOptions(mapping?.dropdownOptions);
-  await saveDropdownOptions(
-    spreadsheetId,
-    tabId,
-    columnIndex,
-    options,
-    select.value
-  );
 }
 
 async function onAddDropdownOption(e) {

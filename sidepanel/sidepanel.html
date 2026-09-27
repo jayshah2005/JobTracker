@@ -108,8 +108,24 @@
             </span>
           </div>
           <div class="panel-card-body">
-            <label class="sr-only" for="destination-picker">Save to</label>
-            <select id="destination-picker"></select>
+            <label class="sr-only" for="destination-picker-input">Save to</label>
+            <div class="combo" id="destination-combo" data-destination-combo>
+              <div class="combo-control">
+                <input
+                  type="text"
+                  id="destination-picker-input"
+                  class="combo-input"
+                  placeholder="Search destinations…"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  role="combobox"
+                />
+                <button type="button" class="combo-caret" tabindex="-1" aria-label="Show destinations"></button>
+              </div>
+              <ul class="combo-menu hidden" role="listbox"></ul>
+            </div>
             <p id="destination-locked-hint" class="field-hint hidden">
               Destination is locked while editing this row.
             </p>
