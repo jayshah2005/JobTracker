@@ -252,6 +252,13 @@ body {
   border-radius: var(--jt-radius);
   margin-bottom: 12px;
   overflow: hidden;
+  position: relative;
+}
+
+/* Let open text-dropdown menus paint outside the card instead of clipping. */
+.panel-card:has(.combo.is-open) {
+  overflow: visible;
+  z-index: 6;
 }
 
 .panel-card-header {
@@ -427,6 +434,13 @@ select {
   margin-bottom: 10px;
 }
 
+.combo.is-disabled,
+.combo.is-disabled .combo-input {
+  opacity: 0.65;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .combo-control {
   position: relative;
   display: block;
@@ -477,19 +491,19 @@ select {
 
 .combo-menu {
   position: absolute;
-  z-index: 20;
+  z-index: 40;
   left: 0;
   right: 0;
-  top: calc(100% - 6px);
+  top: calc(100% + 4px);
   margin: 0;
   padding: 4px;
   list-style: none;
-  max-height: 180px;
+  max-height: 220px;
   overflow: auto;
   background: #fff;
   border: 1px solid var(--jt-border);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
 .combo-menu.hidden {
