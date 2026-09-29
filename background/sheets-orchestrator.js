@@ -8,6 +8,7 @@ import {
   loadTabRows,
   saveJobToTab,
   updateJobInTab,
+  deleteJobRowInTab,
   fetchSpreadsheetMetadata,
   syncTabHeaders,
   renameSheetTab,
@@ -588,4 +589,53 @@ export async function saveJob(message) {
       sheetName: sheet.name,
     };
   });
+}
+
+/**
+ * Delete an existing application row from a connected sheet tab.
+ */
+export async function deleteJob(message) {
+  const { spreadsheetId, tabId, rowIndex } = message;
+  const index = Number(rowIndex);
+
+  if (!spreadsheetId || tabId == null) {
+    return { success: false, error: 'Missing sheet or tab.' };
+  }
+  if (!Number.isFinite(index) || index < 0) {
+    return { success: false, error: 'Invalid row to delete.' };
+  }
+  if (index === 0) {
+    return { success: false, error: 'Cannot delete the header row.' };
+  }
+
+  try {
+    return await withSheetAccess(async (token) => {
+      const sheets = await getConfiguredSheets();
+      const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
+      if (!sheet) return { success: false, error: 'Sheet not found' };
+
+      const tab = (sheet.tabs || []).find(
+        (t) => String(t.gid) === String(tabId) || String(t.tabId) === String(tabId)
+      );
+      if (!tab) return { success: false, error: 'Tab not found' };
+
+      const sheetIdForApi = tab.sheetId ?? tab.gid;
+      await deleteJobRowInTab(spreadsheetId, sheetIdForApi, index, token);
+
+      if (Number.isFinite(Number(tab.rowCount)) && tab.rowCount > 0) {
+        tab.rowCount = Math.max(0, Number(tab.rowCount) - 1);
+        await saveConfiguredSheets(sheets);
+      }
+
+      return {
+        success: true,
+        deleted: true,
+        spreadsheetId,
+        tabId: tab.gid,
+        rowIndex: index,
+      };
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }

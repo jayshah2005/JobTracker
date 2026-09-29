@@ -73,9 +73,14 @@
           <div class="applied-badge">Already in tracker</div>
           <p id="applied-summary" class="applied-summary"></p>
           <p id="applied-meta" class="field-hint"></p>
-          <button type="button" class="btn btn-primary-outline" id="edit-existing-btn">
-            Edit application
-          </button>
+          <div class="applied-actions">
+            <button type="button" class="btn btn-primary-outline" id="edit-existing-btn">
+              Edit application
+            </button>
+            <button type="button" class="btn btn-danger-outline" id="delete-existing-btn">
+              Delete from tracker
+            </button>
+          </div>
         </div>
       </div>
 
@@ -155,6 +160,9 @@
               <path d="M7 3v5h8" />
             </svg>
             <span id="save-btn-label">Save to tracker</span>
+          </button>
+          <button type="button" class="btn btn-danger-outline hidden" id="delete-editing-btn">
+            Delete from tracker
           </button>
         </div>
       </div>
