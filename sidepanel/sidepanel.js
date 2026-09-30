@@ -86,6 +86,12 @@ async function init() {
   $('#edit-existing-btn')?.addEventListener('click', () => {
     startEditingExisting().catch((err) => showStatus(err.message, 'error'));
   });
+  $('#delete-existing-btn')?.addEventListener('click', () => {
+    handleDeleteExisting().catch((err) => showStatus(err.message, 'error'));
+  });
+  $('#delete-editing-btn')?.addEventListener('click', () => {
+    handleDeleteExisting().catch((err) => showStatus(err.message, 'error'));
+  });
 
   chrome.tabs.onUpdated.addListener(onBoundTabUpdated);
   chrome.tabs.onRemoved.addListener((tabId) => {
@@ -559,6 +565,9 @@ function renderEditChrome() {
   if (label) {
     label.textContent = editing ? 'Update tracker' : 'Save to tracker';
   }
+
+  const deleteEditingBtn = $('#delete-editing-btn');
+  deleteEditingBtn?.classList.toggle('hidden', !editing);
 }
 
 function companyInitials(name) {
@@ -1206,6 +1215,83 @@ function restoreSaveButton() {
     </svg>
     <span id="save-btn-label">${label}</span>
   `;
+}
+
+async function handleDeleteExisting() {
+  const editing = isEditingExisting();
+  const spreadsheetId =
+    (editing && selectedDestination?.sheetId) || existingMatch?.spreadsheetId;
+  const tabId =
+    (editing && selectedDestination?.gid) ??
+    existingMatch?.gid ??
+    existingMatch?.tabId;
+  const rowIndex = editing
+    ? Number(editingRowIndex)
+    : Number(existingMatch?.rowIndex);
+
+  if (!spreadsheetId || tabId == null || !Number.isFinite(rowIndex) || rowIndex < 0) {
+    showStatus('Could not find that saved row to delete.', 'error');
+    return;
+  }
+  if (rowIndex === 0) {
+    showStatus('Cannot delete the header row.', 'error');
+    return;
+  }
+
+  const role = existingMatch?.role || extractedData.role || 'this application';
+  const company = existingMatch?.company || extractedData.company || '';
+  const label = company ? `${role} at ${company}` : role;
+  if (
+    !confirm(
+      `Remove “${label}” from your Google Sheet?\n\nThis deletes the row in Sheets and cannot be undone from Job Tracker.`
+    )
+  ) {
+    return;
+  }
+
+  const appliedBtn = $('#delete-existing-btn');
+  const editingBtn = $('#delete-editing-btn');
+  const buttons = [appliedBtn, editingBtn].filter(Boolean);
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+  });
+  if (appliedBtn) appliedBtn.textContent = 'Deleting…';
+  if (editingBtn) editingBtn.textContent = 'Deleting…';
+
+  try {
+    const res = await sendMessage({
+      type: 'DELETE_JOB',
+      spreadsheetId,
+      tabId,
+      rowIndex,
+    });
+
+    if (!res?.success) {
+      showStatus(res?.error || 'Could not delete that application.', 'error');
+      return;
+    }
+
+    existingMatch = null;
+    editingRowIndex = null;
+    userInputs = {};
+    if (boundTabId && chrome.storage?.session) {
+      await chrome.storage.session.remove(draftKey(boundTabId));
+    }
+
+    showStatus('Removed from your tracker.', 'success');
+    await loadData({ restoreDraft: false });
+  } catch (err) {
+    showStatus(err.message || 'Could not delete that application.', 'error');
+  } finally {
+    if (appliedBtn) {
+      appliedBtn.disabled = false;
+      appliedBtn.textContent = 'Delete from tracker';
+    }
+    if (editingBtn) {
+      editingBtn.disabled = false;
+      editingBtn.textContent = 'Delete from tracker';
+    }
+  }
 }
 
 function collectFieldValues() {

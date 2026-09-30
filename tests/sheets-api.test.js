@@ -3,6 +3,7 @@ import {
   apiRequest,
   fetchSheetValues,
   updateRow,
+  deleteJobRowInTab,
   rowIndexFromUpdatedRange,
 } from '../lib/sheets-api.js';
 
@@ -42,6 +43,41 @@ describe('sheets-api', () => {
         method: 'PUT',
         body: JSON.stringify({ values: [['a', 'b', 'c']] }),
       })
+    );
+  });
+
+  test('deleteJobRowInTab sends deleteDimension for the row', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ replies: [{}] }),
+    });
+
+    await deleteJobRowInTab('sheet-id', '42', 5, 'token');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/spreadsheets/sheet-id:batchUpdate'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          requests: [
+            {
+              deleteDimension: {
+                range: {
+                  sheetId: 42,
+                  dimension: 'ROWS',
+                  startIndex: 5,
+                  endIndex: 6,
+                },
+              },
+            },
+          ],
+        }),
+      })
+    );
+  });
+
+  test('deleteJobRowInTab refuses the header row', async () => {
+    await expect(deleteJobRowInTab('sheet-id', 0, 0, 'token')).rejects.toThrow(
+      'Cannot delete the header row.'
     );
   });
 
