@@ -49,6 +49,7 @@ export async function getOauthSetup() {
   const clientId = effectiveClientId(storedId);
   const clientSecret = effectiveClientSecret(storedSecret);
   const token = await getGoogleToken();
+  const hasSession = Boolean(token?.refreshToken) || isAccessTokenFresh(token);
   return {
     success: true,
     redirectUri: getRedirectUri(),
@@ -57,7 +58,8 @@ export async function getOauthSetup() {
     needsSetup: !clientId || !clientSecret,
     usingPublishedOAuth: hasPublishedOAuthDefaults(),
     usingCustomClient: Boolean(String(storedId || '').trim()),
-    signedIn: isAccessTokenFresh(token),
+    // Refresh token means the user already granted access; access tokens expire ~1h.
+    signedIn: hasSession,
   };
 }
 
@@ -78,14 +80,47 @@ export async function saveOauthClient(clientId, clientSecret) {
 
 export async function getAuthStatus() {
   const setup = await getOauthSetup();
+  if (setup.needsSetup) {
+    return {
+      success: true,
+      signedIn: false,
+      needsSetup: true,
+      redirectUri: setup.redirectUri,
+      clientId: setup.clientId,
+      usingPublishedOAuth: setup.usingPublishedOAuth,
+      usingCustomClient: setup.usingCustomClient,
+    };
+  }
+
+  // Access tokens expire quickly; refresh silently so opening the side panel
+  // does not bounce signed-in users back to the Sign in screen.
+  const token = await getGoogleToken();
+  if (token?.refreshToken && !isAccessTokenFresh(token)) {
+    try {
+      await requestGoogleToken(false);
+    } catch {
+      // Refresh failed — treat as signed out so the UI can offer Sign in.
+      return {
+        success: true,
+        signedIn: false,
+        needsSetup: false,
+        redirectUri: setup.redirectUri,
+        clientId: setup.clientId,
+        usingPublishedOAuth: setup.usingPublishedOAuth,
+        usingCustomClient: setup.usingCustomClient,
+      };
+    }
+  }
+
+  const fresh = await getOauthSetup();
   return {
     success: true,
-    signedIn: setup.signedIn,
-    needsSetup: setup.needsSetup,
-    redirectUri: setup.redirectUri,
-    clientId: setup.clientId,
-    usingPublishedOAuth: setup.usingPublishedOAuth,
-    usingCustomClient: setup.usingCustomClient,
+    signedIn: fresh.signedIn,
+    needsSetup: false,
+    redirectUri: fresh.redirectUri,
+    clientId: fresh.clientId,
+    usingPublishedOAuth: fresh.usingPublishedOAuth,
+    usingCustomClient: fresh.usingCustomClient,
   };
 }
 
