@@ -508,6 +508,12 @@ describe('date applied on save', () => {
     expect(toDateInputValue('')).toBe('');
   });
 
+  test('toDateInputValue accepts Google Sheets serial day numbers', () => {
+    // 2026-09-19 = serial 46284 (Sheets epoch 1899-12-30)
+    expect(toDateInputValue(46284)).toBe('2026-09-19');
+    expect(toDateInputValue('46284')).toBe('2026-09-19');
+  });
+
   test('rowToFormInputs normalizes Date Applied for date inputs', () => {
     const mappings = buildDefaultMappings();
     const inputs = rowToFormInputs(mappings, [
