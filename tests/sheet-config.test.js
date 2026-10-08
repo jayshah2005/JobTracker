@@ -4,6 +4,7 @@ import {
   getAllDestinations,
   shouldShowDestinationPicker,
   mergeTabMappings,
+  findDestination,
 } from '../lib/sheet-config.js';
 import { FIELD_TAGS } from '../lib/constants.js';
 
@@ -113,5 +114,20 @@ describe('destination picker visibility', () => {
   test('shows picker for multiple sheets', () => {
     expect(shouldShowDestinationPicker(multiSheet)).toBe(true);
     expect(getAllDestinations(multiSheet)).toHaveLength(2);
+  });
+});
+
+describe('findDestination', () => {
+  test('matches sheet and tab ids with string/number coercion', () => {
+    const sheets = [
+      {
+        spreadsheetId: 'abc',
+        name: 'Jobs',
+        tabs: [{ tabName: 'Apps', gid: '0', tabId: '0', mappings: [] }],
+      },
+    ];
+    const hit = findDestination(sheets, 'abc', 0);
+    expect(hit?.tabName).toBe('Apps');
+    expect(findDestination(sheets, 'abc', '0')?.gid).toBe('0');
   });
 });

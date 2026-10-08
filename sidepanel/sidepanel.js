@@ -10,6 +10,7 @@ import {
 import {
   getAllDestinations,
   shouldShowDestinationPicker,
+  findDestination,
 } from '../lib/sheet-config.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
 import { getSettings } from '../lib/storage.js';
@@ -304,22 +305,24 @@ function setupDestinationPicker(preferredKey = null) {
   const combo = $('#destination-combo');
   const input = $('#destination-picker-input');
 
-  if (!shouldShowDestinationPicker(sheets)) {
-    section.classList.add('hidden');
-    selectedDestination = destinations[0] || null;
-    return;
-  }
-
-  section.classList.remove('hidden');
-
   let idx = 0;
   if (preferredKey) {
-    const found = destinations.findIndex(
-      (d) => `${d.sheetId}:${d.gid}` === preferredKey
-    );
+    const found = destinations.findIndex((d) => {
+      const gidKey = `${d.sheetId}:${d.gid}`;
+      const tabKey = `${d.sheetId}:${d.tabId}`;
+      return gidKey === preferredKey || tabKey === preferredKey;
+    });
     if (found >= 0) idx = found;
   }
+
   selectedDestination = destinations[idx] || destinations[0] || null;
+
+  // Still honor preferred destination when the picker is hidden (single tab).
+  if (!shouldShowDestinationPicker(sheets)) {
+    section.classList.add('hidden');
+  } else {
+    section.classList.remove('hidden');
+  }
 
   if (input) {
     const label = destinationLabel(selectedDestination);
@@ -493,21 +496,28 @@ function enterEditMode(match) {
   existingMatch = match;
   editingRowIndex = Number(match.rowIndex);
 
+  const dest =
+    findDestination(sheets, match.spreadsheetId, match.gid) ||
+    findDestination(sheets, match.spreadsheetId, match.tabId);
   const destKey =
     match.spreadsheetId && match.gid != null
       ? `${match.spreadsheetId}:${match.gid}`
       : null;
   setupDestinationPicker(destKey);
+  if (dest) selectedDestination = dest;
 
   const mappings = selectedDestination?.mappings || [];
+  // Sheet row is source of truth when revisiting — do not mix in page extraction.
   userInputs = rowToFormInputs(mappings, match.row || []);
 
-  // Prefer saved sheet values for the job card while editing.
   extractedData = {
     ...extractedData,
     company: match.company || extractedData.company,
     role: match.role || extractedData.role,
     url: match.url || extractedData.url,
+    location: match.location || extractedData.location,
+    jobId: match.jobId || extractedData.jobId,
+    applicationStatus: match.status || extractedData.applicationStatus,
   };
 
   renderJobCard();
@@ -639,13 +649,16 @@ function renderDynamicFields({ preferExistingInputs = false } = {}) {
 
   container.innerHTML = fields.map((field) => renderField(field, preferExistingInputs)).join('');
 
-  for (const field of fields) {
-    if (field.type === 'dropdown') continue;
-    const existing = userInputs[`col_${field.columnIndex}`];
-    if (preferExistingInputs && existing != null && existing !== '') continue;
-    const suggested = field.suggestedValue;
-    if (suggested != null && suggested !== '') {
-      setUserInputForField(field.tag, field.columnIndex, 'text', suggested);
+  // When editing a saved row, never overwrite sheet values with page extraction.
+  if (!preferExistingInputs) {
+    for (const field of fields) {
+      if (field.type === 'dropdown') continue;
+      const existing = userInputs[`col_${field.columnIndex}`];
+      if (existing != null && existing !== '') continue;
+      const suggested = field.suggestedValue;
+      if (suggested != null && suggested !== '') {
+        setUserInputForField(field.tag, field.columnIndex, 'text', suggested);
+      }
     }
   }
 
@@ -666,13 +679,16 @@ function renderField(field, preferExistingInputs = false) {
   if (field.type === 'dropdown') {
     const options = normalizeDropdownOptions(field.options);
     const optionsEncoded = encodeURIComponent(JSON.stringify(options));
-    const suggested =
-      (preferExistingInputs && (existingDropdown || existingCol)) ||
-      field.suggestedValue ||
-      '';
-    const hint = field.hint
-      ? `<p class="field-hint">${escapeHtml(field.hint)}</p>`
-      : '';
+    const suggested = preferExistingInputs
+      ? existingDropdown || existingCol || ''
+      : existingDropdown || existingCol || field.suggestedValue || '';
+    const hint = preferExistingInputs
+      ? suggested
+        ? '<p class="field-hint">From your sheet — edit if needed</p>'
+        : ''
+      : field.hint
+        ? `<p class="field-hint">${escapeHtml(field.hint)}</p>`
+        : '';
     return `
       <div class="field-row">
         <label for="${id}">${escapeHtml(field.header)}</label>
@@ -701,24 +717,34 @@ function renderField(field, preferExistingInputs = false) {
       </div>`;
   }
 
-  const suggestedRaw =
-    (preferExistingInputs && existingCol) ||
-    field.suggestedValue ||
-    getAutoValue(field.tag, extractedData) ||
-    '';
+  const suggestedRaw = preferExistingInputs
+    ? existingCol || ''
+    : existingCol ||
+      field.suggestedValue ||
+      getAutoValue(field.tag, extractedData) ||
+      '';
   const isDateField =
     field.tag === FIELD_TAGS.DATE_APPLIED ||
     field.tag === FIELD_TAGS.CURRENT_DATE ||
     field.tag === FIELD_TAGS.JOB_POSTED_DATE;
+  // When editing from the sheet, never invent today's date over a blank/unparsed cell.
   const suggested = isDateField
     ? toDateInputValue(suggestedRaw) ||
-      (field.tag === FIELD_TAGS.JOB_POSTED_DATE ? '' : formatDate())
+      (preferExistingInputs
+        ? ''
+        : field.tag === FIELD_TAGS.JOB_POSTED_DATE
+          ? ''
+          : formatDate())
     : suggestedRaw;
-  const hint = field.autoFilled
-    ? '<p class="field-hint">Auto-filled — edit if needed</p>'
-    : field.hint
-      ? `<p class="field-hint">${escapeHtml(field.hint)}</p>`
-      : '';
+  const hint = preferExistingInputs
+    ? suggested
+      ? '<p class="field-hint">From your sheet — edit if needed</p>'
+      : ''
+    : field.autoFilled
+      ? '<p class="field-hint">Auto-filled — edit if needed</p>'
+      : field.hint
+        ? `<p class="field-hint">${escapeHtml(field.hint)}</p>`
+        : '';
 
   if (field.type === 'textarea') {
     return `
