@@ -5,7 +5,26 @@ alwaysApply: true
 
 # Git commit & branch
 
-Only commit / push / create branches when the user explicitly asks. Never commit proactively.
+Only commit when the user explicitly asks. Never commit proactively.
+
+## Before every commit (branch check)
+
+1. Run `git branch --show-current` (and `git status -sb`).
+2. Confirm the branch matches the work:
+   - Name should be `type/scope[-short-slug]` aligned with the primary commit.
+   - **Do not commit on `main`** unless the user explicitly says to.
+3. If the branch is wrong or missing, **stop and fix first**: create/checkout the correct branch (from the requested base, default `main`), then commit there.
+4. If unsure which branch fits, ask before committing.
+
+## After commit (push + PR)
+
+Unless the user says otherwise (e.g. “commit only”, “don’t push”, “no PR”):
+
+1. Push the branch (`git push -u origin HEAD` if needed).
+2. Open a PR into the base branch (default `main`) with `gh pr create`.
+3. Return the PR URL when done.
+
+Skip the PR only when explicitly told not to create one.
 
 ## Message format
 
@@ -56,4 +75,4 @@ One coherent change per commit. Split unrelated concerns; stage precise paths (`
 
 ## Safety
 
-No history rewrite / force-push / `--no-verify` / discarding unfamiliar files unless explicitly asked. Never commit secrets (`.env*`, client secrets). Don’t push unless asked. Don’t update git config.
+No history rewrite / force-push / `--no-verify` / discarding unfamiliar files unless explicitly asked. Never commit secrets (`.env*`, client secrets). Don’t update git config.
