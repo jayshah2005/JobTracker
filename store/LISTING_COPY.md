@@ -167,12 +167,18 @@ Job Tracker processes job-related fields the user chooses to save (such as compa
 
 ## Privacy policy URL
 
-The store requires a public privacy policy link for this permission set. Host a page (GitHub Pages, Notion public page, your site) and paste the URL.
+The store and Google OAuth branding require public URLs:
+
+| Field | URL |
+|-------|-----|
+| Application home page | https://jayshah2005.github.io/JobTracker/ |
+| Privacy policy | https://jayshah2005.github.io/JobTracker/privacy.html |
+
+Home page is root `index.html`. Privacy page (`privacy.html`) loads the draft
+below from this file on page load — edit the fenced block and push.
 
 ### Privacy policy draft (publish this page)
 
-Edit this fenced block and push. Root `index.html` (GitHub Pages) reads it on
-load — e.g. https://jayshah2005.github.io/JobTracker/
 
 ```
 Privacy Policy — Job Tracker Chrome Extension

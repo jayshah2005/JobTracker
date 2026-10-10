@@ -136,13 +136,21 @@ For a one-off local test you may set `DEFAULT_OAUTH_CLIENT_ID` / `DEFAULT_OAUTH_
 
 ---
 
-## 6. Privacy policy
+## 6. Home page + privacy policy
 
-Host a public page (GitHub Pages, Notion, your site). Draft text: `store/LISTING_COPY.md`.
+GitHub Pages in this repo serves:
 
-Add the URL to:
-- Chrome Web Store → Privacy practices  
-- Google Cloud OAuth consent screen → Application home / privacy policy fields  
+| OAuth Branding field | URL |
+|----------------------|-----|
+| Application home page | https://jayshah2005.github.io/JobTracker/ |
+| Application privacy policy | https://jayshah2005.github.io/JobTracker/privacy.html |
+
+Edit the privacy draft in `store/LISTING_COPY.md` and push — `privacy.html` reads it on load.
+Authorized domain: `github.io`.
+
+Add the same URLs to:
+- Chrome Web Store → Privacy practices (privacy URL)
+- Google Auth Platform → **Branding** → App domain (home + privacy)
 
 ---
 
