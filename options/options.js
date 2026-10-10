@@ -12,6 +12,7 @@ const $ = (sel) => document.querySelector(sel);
 let sheets = [];
 let settings = {};
 let undoStack = [];
+let redoStack = [];
 /** Remember which dropdown editors the user expanded. */
 const openDropdownEditors = new Set();
 /** Active spreadsheet + worksheet tab selections (survive re-renders). */
@@ -79,6 +80,7 @@ async function init() {
   $('#add-sheet-btn').addEventListener('click', handleAddSheet);
   $('#refresh-btn').addEventListener('click', handleRefresh);
   $('#undo-btn').addEventListener('click', () => handleUndo());
+  $('#redo-btn').addEventListener('click', () => handleRedo());
   $('#auto-show').addEventListener('change', saveSettingsFromUI);
   $('#embed-role-link').addEventListener('change', saveSettingsFromUI);
   $('#sign-in-btn').addEventListener('click', handleSignIn);
@@ -90,10 +92,40 @@ async function init() {
     if (e.key === 'Enter') handleAddSheet();
   });
 
+  document.addEventListener('keydown', handleSchemaHistoryShortcut);
+
   await loadAuth();
   await loadSheets();
   await loadSettings();
   await loadUndoStack();
+}
+
+function isEditableTarget(el) {
+  if (!el || el === document.body) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (el.isContentEditable) return true;
+  return false;
+}
+
+function handleSchemaHistoryShortcut(e) {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod || e.altKey) return;
+  // Let the browser handle text undo/redo inside fields.
+  if (isEditableTarget(e.target)) return;
+
+  const key = e.key.toLowerCase();
+  if (key === 'z' && !e.shiftKey) {
+    if (!undoStack.length) return;
+    e.preventDefault();
+    handleUndo();
+    return;
+  }
+  if ((key === 'z' && e.shiftKey) || key === 'y') {
+    if (!redoStack.length) return;
+    e.preventDefault();
+    handleRedo();
+  }
 }
 
 async function loadAuth() {
@@ -207,6 +239,7 @@ async function loadSettings() {
 async function loadUndoStack() {
   const res = await sendMessage({ type: 'GET_UNDO_STACK' });
   undoStack = res.stack || [];
+  redoStack = res.redoStack || [];
   renderUndoBar();
 }
 
@@ -282,19 +315,34 @@ async function handleRefresh() {
 
 function renderUndoBar() {
   const bar = $('#undo-bar');
-  const btn = $('#undo-btn');
+  const undoBtn = $('#undo-btn');
+  const redoBtn = $('#redo-btn');
   const label = $('#undo-label');
 
-  if (!undoStack.length) {
+  if (!undoStack.length && !redoStack.length) {
     bar.classList.add('hidden');
     return;
   }
 
   bar.classList.remove('hidden');
-  const last = undoStack[undoStack.length - 1];
-  label.textContent = `Last change: ${last.label} (${last.tabName})`;
-  btn.disabled = false;
-  btn.textContent = `Undo (${undoStack.length})`;
+  if (undoStack.length) {
+    const last = undoStack[undoStack.length - 1];
+    label.textContent = `Last change: ${last.label} (${last.tabName})`;
+  } else if (redoStack.length) {
+    const next = redoStack[redoStack.length - 1];
+    label.textContent = `Ready to redo: ${next.label} (${next.tabName})`;
+  } else {
+    label.textContent = '';
+  }
+
+  undoBtn.disabled = !undoStack.length;
+  undoBtn.textContent = undoStack.length
+    ? `Undo (${undoStack.length})`
+    : 'Undo';
+  redoBtn.disabled = !redoStack.length;
+  redoBtn.textContent = redoStack.length
+    ? `Redo (${redoStack.length})`
+    : 'Redo';
 }
 
 function renderSheetList() {
@@ -1205,6 +1253,7 @@ async function applyChange(spreadsheetId, tabId, change) {
 
   sheets = res.sheets;
   undoStack = res.stack || undoStack;
+  redoStack = res.redoStack || [];
   renderSheetList();
   renderUndoBar();
   showStatus(
@@ -1430,6 +1479,7 @@ async function onAddColumn(e) {
 }
 
 async function handleUndo(entryId) {
+  if (!undoStack.length) return;
   const btn = $('#undo-btn');
   btn.disabled = true;
   btn.textContent = 'Undoing…';
@@ -1439,6 +1489,7 @@ async function handleUndo(entryId) {
     if (res.success) {
       sheets = res.sheets;
       undoStack = res.stack || [];
+      redoStack = res.redoStack || [];
       renderSheetList();
       renderUndoBar();
       showStatus(
@@ -1447,6 +1498,34 @@ async function handleUndo(entryId) {
       );
     } else {
       showStatus(res.error || 'Undo failed.', 'error');
+      renderUndoBar();
+    }
+  } catch (err) {
+    showStatus(err.message, 'error');
+    renderUndoBar();
+  }
+}
+
+async function handleRedo(entryId) {
+  if (!redoStack.length) return;
+  const btn = $('#redo-btn');
+  btn.disabled = true;
+  btn.textContent = 'Redoing…';
+
+  try {
+    const res = await sendMessage({ type: 'REDO_SCHEMA_CHANGE', entryId });
+    if (res.success) {
+      sheets = res.sheets;
+      undoStack = res.stack || [];
+      redoStack = res.redoStack || [];
+      renderSheetList();
+      renderUndoBar();
+      showStatus(
+        `Redid: ${res.restored?.label || 'last change'}. Headers restored if needed.`,
+        'success'
+      );
+    } else {
+      showStatus(res.error || 'Redo failed.', 'error');
       renderUndoBar();
     }
   } catch (err) {

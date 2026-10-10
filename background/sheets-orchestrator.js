@@ -32,6 +32,8 @@ import {
   getSettings,
   getUndoStack,
   saveUndoStack,
+  getRedoStack,
+  saveRedoStack,
 } from '../lib/storage.js';
 import {
   applySchemaChange,
@@ -40,6 +42,8 @@ import {
   createUndoEntry,
   pushUndo,
   popUndo,
+  pushRedo,
+  popRedo,
   describeChange,
   isDestructiveOp,
   DESTRUCTIVE_WARNING,
@@ -289,6 +293,8 @@ export async function applySchemaChangeMessage(message) {
 
   const stack = pushUndo(await getUndoStack(), entry);
   await saveUndoStack(stack);
+  // New edits invalidate redo history.
+  await saveRedoStack([]);
   await saveConfiguredSheets(sheets);
 
   return {
@@ -296,6 +302,7 @@ export async function applySchemaChangeMessage(message) {
     sheets,
     undoEntry: entry,
     stack,
+    redoStack: [],
     syncedHeaders: result.syncHeaders && !tab.isNew && !skipSync,
   };
 }
@@ -429,10 +436,73 @@ export async function undoSchemaChange(entryId) {
     });
   }
 
+  const redoStack = pushRedo(await getRedoStack(), entry);
   await saveUndoStack(nextStack);
+  await saveRedoStack(redoStack);
   await saveConfiguredSheets(sheets);
 
-  return { success: true, sheets, stack: nextStack, restored: entry };
+  return {
+    success: true,
+    sheets,
+    stack: nextStack,
+    redoStack,
+    restored: entry,
+  };
+}
+
+export async function redoSchemaChange(entryId) {
+  const stack = await getRedoStack();
+  let entry = null;
+  let nextRedo = stack;
+
+  if (entryId) {
+    const idx = stack.findIndex((e) => e.id === entryId);
+    if (idx < 0) return { success: false, error: 'Nothing to redo.' };
+    entry = stack[idx];
+    nextRedo = [...stack.slice(0, idx), ...stack.slice(idx + 1)];
+  } else {
+    const popped = popRedo(stack);
+    entry = popped.entry;
+    nextRedo = popped.stack;
+  }
+
+  if (!entry) return { success: false, error: 'Nothing to redo.' };
+
+  const sheets = await getConfiguredSheets();
+  const sheet = sheets.find((s) => s.spreadsheetId === entry.spreadsheetId);
+  if (!sheet) {
+    await saveRedoStack(nextRedo);
+    return { success: false, error: 'Sheet no longer connected.' };
+  }
+
+  const tab = sheet.tabs.find(
+    (t) => t.tabId === entry.tabId || t.gid === entry.tabId
+  );
+  if (!tab) {
+    await saveRedoStack(nextRedo);
+    return { success: false, error: 'Tab no longer available.' };
+  }
+
+  restoreTabSchema(tab, entry.after);
+
+  if (entry.destructive && !tab.isNew) {
+    await withSheetAccess(async (token) => {
+      await syncTabHeaders(entry.spreadsheetId, tab.tabName, tab.headers, token);
+    });
+  }
+
+  const undoStack = pushUndo(await getUndoStack(), entry);
+  await saveUndoStack(undoStack);
+  await saveRedoStack(nextRedo);
+  await saveConfiguredSheets(sheets);
+
+  return {
+    success: true,
+    sheets,
+    stack: undoStack,
+    redoStack: nextRedo,
+    restored: entry,
+  };
 }
 
 async function loadAllTabsWithRows(token, sheets) {

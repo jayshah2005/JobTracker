@@ -23,10 +23,14 @@
 
       <div id="undo-bar" class="undo-bar hidden">
         <div>
-          <strong>Undo available</strong>
+          <strong>Schema history</strong>
           <span id="undo-label" class="undo-label"></span>
+          <span class="undo-shortcuts">Ctrl/⌘Z · Ctrl/⌘⇧Z or Ctrl/⌘Y</span>
         </div>
-        <button class="btn btn-secondary btn-sm" id="undo-btn">Undo</button>
+        <div class="undo-actions">
+          <button class="btn btn-secondary btn-sm" id="undo-btn" title="Undo (Ctrl/⌘Z)">Undo</button>
+          <button class="btn btn-secondary btn-sm" id="redo-btn" title="Redo (Ctrl/⌘⇧Z)">Redo</button>
+        </div>
       </div>
 
       <div class="help-box">

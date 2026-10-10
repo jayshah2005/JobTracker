@@ -487,11 +487,25 @@ body {
   font-size: 13px;
 }
 
+.undo-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .undo-label {
   display: block;
   color: var(--jt-muted);
   font-size: 12px;
   margin-top: 2px;
+}
+
+.undo-shortcuts {
+  display: block;
+  color: var(--jt-muted);
+  font-size: 11px;
+  margin-top: 4px;
 }
 
 .schema-hint {

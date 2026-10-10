@@ -5,6 +5,8 @@ import {
   restoreTabSchema,
   pushUndo,
   popUndo,
+  pushRedo,
+  popRedo,
   createUndoEntry,
   isDestructiveOp,
   DESTRUCTIVE_WARNING,
@@ -156,6 +158,28 @@ describe('schema-editor', () => {
     stack = pushUndo(stack, entry);
     expect(stack).toHaveLength(1);
     const { stack: next, entry: popped } = popUndo(stack);
+    expect(popped.id).toBe(entry.id);
+    expect(next).toHaveLength(0);
+  });
+
+  test('redo stack push and pop', () => {
+    let stack = [];
+    const entry = createUndoEntry({
+      spreadsheetId: 'abc',
+      tabId: '0',
+      tabName: 'Jobs',
+      before: snapshotTabSchema({ headers, mappings, isNew: false }),
+      after: snapshotTabSchema({
+        headers: ['Employer', 'Role', 'Notes'],
+        mappings,
+        isNew: false,
+      }),
+      change: { op: SCHEMA_OPS.RENAME, columnIndex: 0, newHeader: 'Employer' },
+      label: 'Rename',
+    });
+    stack = pushRedo(stack, entry);
+    expect(stack).toHaveLength(1);
+    const { stack: next, entry: popped } = popRedo(stack);
     expect(popped.id).toBe(entry.id);
     expect(next).toHaveLength(0);
   });

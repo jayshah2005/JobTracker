@@ -17,12 +17,19 @@ import {
   applySchemaChangeMessage,
   syncTabColumnUniques,
   undoSchemaChange,
+  redoSchemaChange,
   findApplication,
   saveJob,
   deleteJob,
   renameTab,
 } from './sheets-orchestrator.js';
-import { getConfiguredSheets, getSettings, saveSettings, getUndoStack } from '../lib/storage.js';
+import {
+  getConfiguredSheets,
+  getSettings,
+  saveSettings,
+  getUndoStack,
+  getRedoStack,
+} from '../lib/storage.js';
 import {
   registerSidePanel,
   handleSidePanelMessage,
@@ -83,8 +90,14 @@ async function handleMessage(message, sender) {
       return syncTabColumnUniques(message);
     case 'UNDO_SCHEMA_CHANGE':
       return undoSchemaChange(message.entryId);
+    case 'REDO_SCHEMA_CHANGE':
+      return redoSchemaChange(message.entryId);
     case 'GET_UNDO_STACK':
-      return { success: true, stack: await getUndoStack() };
+      return {
+        success: true,
+        stack: await getUndoStack(),
+        redoStack: await getRedoStack(),
+      };
     default:
       return { success: false, error: 'Unknown message type' };
   }
