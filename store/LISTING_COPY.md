@@ -171,14 +171,17 @@ The store requires a public privacy policy link for this permission set. Host a 
 
 ### Privacy policy draft (publish this page)
 
+Edit this fenced block, then run `npm run privacy-page` to regenerate
+`store/privacy/index.html` for GitHub Pages (or any static host).
+
 ```
 Privacy Policy — Job Tracker Chrome Extension
-Last updated: [DATE]
+Last updated: Oct 10, 2026
 
 Job Tracker (“the Extension”) helps you save job application information from web pages into Google Spreadsheets that you control.
 
 1. Who we are
-[Your name or entity], publisher of Job Tracker. Contact: [YOUR EMAIL]
+Jay, publisher of Job Tracker. Contact: jayshah3616@gmail.com
 
 2. Data we handle
 • Google OAuth tokens and client configuration you enter, stored in Chrome’s extension storage on your device
@@ -209,7 +212,7 @@ Not directed at children under 13.
 We may update this policy; the “Last updated” date will change.
 
 9. Contact
-[YOUR EMAIL]
+jayshah3616@gmail.com
 ```
 
 ---
