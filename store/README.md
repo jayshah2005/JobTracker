@@ -36,7 +36,9 @@ Store icon: use `icons/icon128.png` (generated from the brand mark).
 1. Bump `version` in `manifest.json` (must increase on every upload).
 2. Complete [`PUBLISHER_OAUTH.md`](PUBLISHER_OAUTH.md) (Cloud project, OAuth client, redirect URI, `.env.oauth`).
 3. Run `npm test` and `npm run pack` (pack injects OAuth from `.env.oauth`).
-4. Host a privacy policy URL (draft text is in `LISTING_COPY.md`).
+4. Host a privacy policy URL: edit the draft in `LISTING_COPY.md`, push, then
+   use your GitHub Pages URL (root `index.html` loads the draft on page load,
+   e.g. https://jayshah2005.github.io/JobTracker/).
 5. Copy answers from [`LISTING_COPY.md`](LISTING_COPY.md) into the Privacy practices and Store listing tabs.
 6. Verify publisher contact email under Dashboard → Settings.
 7. After Chrome assigns a store extension ID, add  

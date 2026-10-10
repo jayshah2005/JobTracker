@@ -171,8 +171,8 @@ The store requires a public privacy policy link for this permission set. Host a 
 
 ### Privacy policy draft (publish this page)
 
-Edit this fenced block, then run `npm run privacy-page` to regenerate
-`store/privacy/index.html` for GitHub Pages (or any static host).
+Edit this fenced block and push. Root `index.html` (GitHub Pages) reads it on
+load — e.g. https://jayshah2005.github.io/JobTracker/
 
 ```
 Privacy Policy — Job Tracker Chrome Extension

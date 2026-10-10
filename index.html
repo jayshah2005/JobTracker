@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — Job Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #1a2332;
+      --muted: #5c6b7a;
+      --line: #d8e0e8;
+      --bg: #f7f9fb;
+      --paper: #ffffff;
+      --accent: #0f6b5c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      font-size: 1.05rem;
+      line-height: 1.65;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #e4f0ec 0%, transparent 55%),
+        radial-gradient(900px 400px at 100% 0%, #e8eef5 0%, transparent 50%),
+        var(--bg);
+    }
+
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 4rem;
+    }
+
+    article {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 2.25rem 2rem;
+      box-shadow: 0 1px 0 rgba(26, 35, 50, 0.04);
+    }
+
+    h1 {
+      margin: 0 0 0.35rem;
+      font-family: "Source Serif 4", Georgia, serif;
+      font-weight: 600;
+      font-size: clamp(1.65rem, 4vw, 2.1rem);
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    .meta {
+      margin: 0 0 1.5rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    h2 {
+      margin: 1.75rem 0 0.5rem;
+      font-family: "Source Serif 4", Georgia, serif;
+      font-weight: 600;
+      font-size: 1.15rem;
+      color: var(--accent);
+    }
+
+    p { margin: 0 0 0.85rem; }
+
+    ul {
+      margin: 0 0 0.85rem;
+      padding-left: 1.2rem;
+    }
+
+    li { margin: 0.25rem 0; }
+
+    li::marker { color: var(--accent); }
+
+    .status {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .status.error { color: #9b2c2c; }
+
+    footer {
+      margin-top: 1.5rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 520px) {
+      article {
+        padding: 1.5rem 1.15rem;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <article id="policy">
+      <p class="status">Loading privacy policy…</p>
+    </article>
+    <footer>Job Tracker Chrome extension</footer>
+  </main>
+  <script>
+    const SOURCE = 'store/LISTING_COPY.md';
+    const DRAFT_HEADING = '### Privacy policy draft';
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function extractDraft(markdown) {
+      const start = markdown.indexOf(DRAFT_HEADING);
+      if (start === -1) throw new Error('Privacy policy draft heading not found in LISTING_COPY.md');
+
+      const afterHeading = markdown.slice(start + DRAFT_HEADING.length);
+      const fenceOpen = afterHeading.indexOf('```');
+      if (fenceOpen === -1) throw new Error('Opening code fence not found');
+
+      const afterOpen = afterHeading.slice(fenceOpen + 3).replace(/^[a-z]*\r?\n/, '');
+      const fenceClose = afterOpen.indexOf('```');
+      if (fenceClose === -1) throw new Error('Closing code fence not found');
+
+      return afterOpen.slice(0, fenceClose).replace(/^\uFEFF/, '').trimEnd();
+    }
+
+    function draftToHtml(draft) {
+      const lines = draft.replace(/\r\n/g, '\n').split('\n');
+      if (!lines.length || !lines[0].trim()) throw new Error('Privacy policy draft is empty');
+
+      const parts = [];
+      parts.push('<h1>' + escapeHtml(lines[0].trim()) + '</h1>');
+
+      let listItems = [];
+      const flushList = () => {
+        if (!listItems.length) return;
+        parts.push('<ul>');
+        for (const item of listItems) parts.push('<li>' + escapeHtml(item) + '</li>');
+        parts.push('</ul>');
+        listItems = [];
+      };
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) {
+          flushList();
+          continue;
+        }
+        if (/^Last updated:/i.test(line)) {
+          flushList();
+          parts.push('<p class="meta">' + escapeHtml(line) + '</p>');
+          continue;
+        }
+        const section = line.match(/^(\d+)\.\s+(.+)$/);
+        if (section) {
+          flushList();
+          parts.push('<h2>' + escapeHtml(section[1] + '. ' + section[2]) + '</h2>');
+          continue;
+        }
+        if (line.startsWith('•') || line.startsWith('- ')) {
+          listItems.push(line.replace(/^[•\-]\s*/, ''));
+          continue;
+        }
+        flushList();
+        parts.push('<p>' + escapeHtml(line) + '</p>');
+      }
+      flushList();
+      return parts.join('\n');
+    }
+
+    async function loadPolicy() {
+      const root = document.getElementById('policy');
+      try {
+        const res = await fetch(SOURCE, { cache: 'no-cache' });
+        if (!res.ok) throw new Error('Could not load ' + SOURCE + ' (' + res.status + ')');
+        const markdown = await res.text();
+        root.innerHTML = draftToHtml(extractDraft(markdown));
+      } catch (err) {
+        root.innerHTML =
+          '<p class="status error">Could not load the privacy policy from LISTING_COPY.md.</p>' +
+          '<p class="status error">' + escapeHtml(err.message || String(err)) + '</p>';
+      }
+    }
+
+    loadPolicy();
+  </script>
+</body>
+</html>
