@@ -5,6 +5,8 @@ import {
   updateRow,
   deleteJobRowInTab,
   rowIndexFromUpdatedRange,
+  seedTabHeaders,
+  setRowsBold,
 } from '../lib/sheets-api.js';
 
 describe('sheets-api', () => {
@@ -96,6 +98,117 @@ describe('sheets-api', () => {
 
     await expect(apiRequest('https://example.com', 'token')).rejects.toThrow(
       'Permission denied'
+    );
+  });
+
+  test('seedTabHeaders clears then writes row 1 for the tab', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ updatedRows: 1 }),
+    });
+
+    const headers = ['Date Applied', 'Job ID', 'Company Name'];
+    await seedTabHeaders('sheet-id', 'Sheet1', headers, 'token');
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/:clear/),
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/Sheet1'!A1/),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ values: [headers] }),
+      })
+    );
+  });
+
+  test('seedTabHeaders bolds header row and clears bold on data rows', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    const headers = ['Date Applied', 'Role', 'Location'];
+    await seedTabHeaders('sheet-id', 'Sheet1', headers, 'token', {
+      sheetId: 42,
+    });
+
+    const batchBodies = global.fetch.mock.calls
+      .filter(([url]) => String(url).includes(':batchUpdate'))
+      .map(([, opts]) => JSON.parse(opts.body));
+
+    expect(batchBodies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requests: [
+            expect.objectContaining({
+              repeatCell: expect.objectContaining({
+                range: expect.objectContaining({
+                  sheetId: 42,
+                  startRowIndex: 0,
+                  endRowIndex: 1,
+                }),
+                cell: {
+                  userEnteredFormat: { textFormat: { bold: true } },
+                },
+              }),
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          requests: [
+            expect.objectContaining({
+              repeatCell: expect.objectContaining({
+                range: expect.objectContaining({
+                  sheetId: 42,
+                  startRowIndex: 1,
+                  endRowIndex: 1000,
+                }),
+                cell: {
+                  userEnteredFormat: { textFormat: { bold: false } },
+                },
+              }),
+            }),
+          ],
+        }),
+      ])
+    );
+  });
+
+  test('setRowsBold sends repeatCell for the row band', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    await setRowsBold('sheet-id', 7, 3, 4, 5, false, 'token');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/spreadsheets/sheet-id:batchUpdate'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          requests: [
+            {
+              repeatCell: {
+                range: {
+                  sheetId: 7,
+                  startRowIndex: 3,
+                  endRowIndex: 4,
+                  startColumnIndex: 0,
+                  endColumnIndex: 5,
+                },
+                cell: {
+                  userEnteredFormat: {
+                    textFormat: { bold: false },
+                  },
+                },
+                fields: 'userEnteredFormat.textFormat.bold',
+              },
+            },
+          ],
+        }),
+      })
     );
   });
 });

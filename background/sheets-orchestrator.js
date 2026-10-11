@@ -11,6 +11,7 @@ import {
   deleteJobRowInTab,
   fetchSpreadsheetMetadata,
   syncTabHeaders,
+  seedTabHeaders,
   renameSheetTab,
   rowIndexFromUpdatedRange,
 } from '../lib/sheets-api.js';
@@ -51,6 +52,52 @@ import {
 } from '../lib/schema-editor.js';
 import { withSheetAccess } from './google-session.js';
 
+/**
+ * Build local tab configs from live sheet rows. Empty tabs get default headers
+ * written to Google Sheets immediately, then marked isNew: false.
+ */
+async function materializeTabs(spreadsheetId, rawTabs, existingTabs, token) {
+  const tabs = [];
+  for (const t of rawTabs) {
+    const config = prepareTabConfig(
+      t.tabName,
+      spreadsheetId,
+      t.gid,
+      t.rows
+    );
+    const seeded = config.isNew;
+    if (seeded) {
+      await seedTabHeaders(spreadsheetId, t.tabName, config.headers, token, {
+        sheetId: t.sheetId ?? t.gid,
+      });
+    }
+
+    const existingTab = existingTabs?.find((et) => et.gid === t.gid);
+    // Fresh default seeds must not inherit stale local mappings (e.g. old URL col).
+    const baseMappings =
+      seeded || !existingTab
+        ? config.mappings
+        : mergeTabMappings(existingTab.mappings, config.mappings);
+
+    tabs.push({
+      tabName: config.tabName,
+      gid: config.gid,
+      tabId: config.gid,
+      sheetId: t.sheetId ?? t.gid,
+      isNew: false,
+      headers: config.headers,
+      mappings: enrichMappingsWithDropdownOptions(
+        baseMappings,
+        seeded ? [] : t.rows
+      ),
+      columnUniques: buildColumnUniques(seeded ? [] : t.rows),
+      // Seeding writes a header row that may not be in the pre-write snapshot.
+      rowCount: seeded ? 1 : t.rows.length,
+    });
+  }
+  return tabs;
+}
+
 export async function addSheet(url) {
   const parsed = parseGoogleSheetUrl(url);
   if (!parsed.valid) {
@@ -64,28 +111,15 @@ export async function addSheet(url) {
       const spreadsheetTitle =
         meta.properties?.title || `Sheet ${parsed.spreadsheetId.slice(0, 8)}…`;
 
-      const tabs = rawTabs.map((t) => {
-        const config = prepareTabConfig(
-          t.tabName,
-          parsed.spreadsheetId,
-          t.gid,
-          t.rows
-        );
-        return {
-          tabName: config.tabName,
-          gid: config.gid,
-          tabId: config.gid,
-          isNew: config.isNew,
-          headers: config.headers,
-          mappings: enrichMappingsWithDropdownOptions(config.mappings, t.rows),
-          columnUniques: buildColumnUniques(t.rows),
-          rowCount: t.rows.length,
-        };
-      });
-
       const sheets = await getConfiguredSheets();
-      const existing = sheets.findIndex(
+      const existing = sheets.find(
         (s) => s.spreadsheetId === parsed.spreadsheetId
+      );
+      const tabs = await materializeTabs(
+        parsed.spreadsheetId,
+        rawTabs,
+        existing?.tabs,
+        token
       );
 
       const sheetEntry = {
@@ -96,14 +130,18 @@ export async function addSheet(url) {
         addedAt: Date.now(),
       };
 
-      if (existing >= 0) {
-        sheets[existing] = sheetEntry;
+      const next = [...sheets];
+      const existingIndex = next.findIndex(
+        (s) => s.spreadsheetId === parsed.spreadsheetId
+      );
+      if (existingIndex >= 0) {
+        next[existingIndex] = sheetEntry;
       } else {
-        sheets.push(sheetEntry);
+        next.push(sheetEntry);
       }
 
-      await saveConfiguredSheets(sheets);
-      return { success: true, sheet: sheetEntry, sheets };
+      await saveConfiguredSheets(next);
+      return { success: true, sheet: sheetEntry, sheets: next };
     });
   } catch (err) {
     return { success: false, error: err.message };
@@ -185,26 +223,12 @@ export async function refreshAllSheets() {
     for (const sheet of sheets) {
       const meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
       const rawTabs = await loadSpreadsheetTabs(sheet.spreadsheetId, token);
-      const tabs = rawTabs.map((t) => {
-        const config = prepareTabConfig(
-          t.tabName,
-          sheet.spreadsheetId,
-          t.gid,
-          t.rows
-        );
-        const existingTab = sheet.tabs?.find((et) => et.gid === t.gid);
-        const mappings = mergeTabMappings(existingTab?.mappings, config.mappings);
-        return {
-          tabName: config.tabName,
-          gid: config.gid,
-          tabId: config.gid,
-          isNew: config.isNew,
-          headers: config.headers,
-          mappings: enrichMappingsWithDropdownOptions(mappings, t.rows),
-          columnUniques: buildColumnUniques(t.rows),
-          rowCount: t.rows.length,
-        };
-      });
+      const tabs = await materializeTabs(
+        sheet.spreadsheetId,
+        rawTabs,
+        sheet.tabs,
+        token
+      );
       updated.push({
         ...sheet,
         name:
@@ -579,29 +603,44 @@ export async function saveJob(message) {
       Number.isFinite(Number(existingRowIndex)) &&
       Number(existingRowIndex) >= 0;
 
+    const settings = await getSettings();
+
+    // Only the chosen tab — never block because the job exists elsewhere.
+    const rows = await loadTabRows(spreadsheetId, tab.tabName, token, {
+      valueRenderOption: 'FORMULA',
+    });
+
     if (!updating) {
-      const allTabs = await loadAllTabsWithRows(token, sheets);
-      const existing = findExistingApplication(allTabs, extractedData);
+      const existing = findExistingApplication(
+        [
+          {
+            sheetName: sheet.name,
+            tabName: tab.tabName,
+            spreadsheetId,
+            gid: String(tab.gid),
+            mappings: tab.mappings,
+            rows,
+          },
+        ],
+        extractedData
+      );
       if (existing.matched) {
         return {
           success: false,
           alreadyApplied: true,
-          error: 'Already in your tracker — open it to edit.',
+          error:
+            'Already in this sheet — update it here, or pick another destination to add a copy.',
           match: existing,
         };
       }
     }
 
-    const settings = await getSettings();
-
-    const rawTabs = await loadSpreadsheetTabs(spreadsheetId, token);
-    const rawTab = rawTabs.find((t) => String(t.gid) === String(tabId));
-    const rows = rawTab?.rows ?? [];
-
     const tabConfig = {
       isNew: tab.isNew,
       headers: tab.headers,
       mappings: tab.mappings,
+      sheetId: tab.sheetId ?? tab.gid,
+      gid: tab.gid,
     };
 
     const row = buildRowFromMappings(tab.mappings, rows, extractedData, {

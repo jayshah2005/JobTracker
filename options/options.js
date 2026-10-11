@@ -76,6 +76,8 @@ function ensureActiveSelections() {
   return { sheet, tab };
 }
 
+let refreshOnVisibleTimer = null;
+
 async function init() {
   $('#add-sheet-btn').addEventListener('click', handleAddSheet);
   $('#refresh-btn').addEventListener('click', handleRefresh);
@@ -93,9 +95,21 @@ async function init() {
   });
 
   document.addEventListener('keydown', handleSchemaHistoryShortcut);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (refreshOnVisibleTimer) clearTimeout(refreshOnVisibleTimer);
+    refreshOnVisibleTimer = setTimeout(async () => {
+      refreshOnVisibleTimer = null;
+      const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
+      if (!auth?.signedIn) return;
+      loadSheets({ fromNetwork: true, quiet: true });
+    }, 400);
+  });
 
   await loadAuth();
-  await loadSheets();
+  const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
+  // Pull live headers/rows so manual Google Sheet edits show up.
+  await loadSheets({ fromNetwork: !!auth?.signedIn, quiet: true });
   await loadSettings();
   await loadUndoStack();
 }
@@ -170,11 +184,26 @@ async function handleSignOut() {
   showStatus('Signed out. Sign in again to read or update sheets.', 'success');
 }
 
-async function loadSheets() {
-  const res = await sendMessage({ type: 'GET_SHEETS' });
+async function loadSheets({ fromNetwork = false, quiet = false } = {}) {
+  const res = await sendMessage({
+    type: fromNetwork ? 'REFRESH_SHEETS' : 'GET_SHEETS',
+  });
+
+  if (fromNetwork && !res?.success) {
+    const cached = await sendMessage({ type: 'GET_SHEETS' });
+    sheets = cached?.sheets || [];
+    renderSheetList();
+    await syncDropdownColumnsFromSheet();
+    if (!quiet) {
+      showStatus(res?.error || 'Could not refresh sheets from Google.', 'error');
+    }
+    return false;
+  }
+
   sheets = res.sheets || [];
   renderSheetList();
   await syncDropdownColumnsFromSheet();
+  return true;
 }
 
 /**
@@ -297,14 +326,8 @@ async function handleRefresh() {
   btn.textContent = 'Refreshing…';
 
   try {
-    const res = await sendMessage({ type: 'REFRESH_SHEETS' });
-    if (res.success) {
-      sheets = res.sheets;
-      renderSheetList();
-      showStatus('Sheets refreshed.', 'success');
-    } else {
-      showStatus(res.error || 'Refresh failed.', 'error');
-    }
+    const ok = await loadSheets({ fromNetwork: true });
+    if (ok) showStatus('Sheets refreshed.', 'success');
   } catch (err) {
     showStatus(err.message, 'error');
   } finally {
@@ -832,7 +855,7 @@ function renderTabMappings(sheet, tab) {
     .join('');
 
   const badge = tab.isNew
-    ? '<span class="badge">New — headers will be created on first save</span>'
+    ? '<span class="badge">New — seeding default headers…</span>'
     : `<span class="badge">${tab.rowCount ?? 0} rows</span>`;
 
   return `
@@ -1221,7 +1244,6 @@ async function applyChange(spreadsheetId, tabId, change) {
   const destructive = isDestructiveOp(change.op);
   let confirmed = !destructive;
 
-  // New empty tabs: header sync is deferred until first save — still warn for clarity
   const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
   const tab = sheet?.tabs?.find((t) => t.gid === tabId);
   const willSyncNow = destructive && tab && !tab.isNew;
@@ -1229,7 +1251,7 @@ async function applyChange(spreadsheetId, tabId, change) {
   if (destructive) {
     const extra = willSyncNow
       ? '\n\nThis will rewrite the header row in Google Sheets right away.'
-      : '\n\nHeaders will be written when you first save a job to this new tab.';
+      : '\n\nHeaders will be written to Google Sheets when this new tab is seeded.';
     confirmed = confirm(`${DESTRUCTIVE_WARNING}${extra}\n\nContinue?`);
     if (!confirmed) return null;
   }

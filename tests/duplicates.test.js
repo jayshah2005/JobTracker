@@ -40,13 +40,12 @@ describe('findExistingApplication', () => {
       gid: '0',
       mappings,
       rows: [
-        ['Date Applied', 'ID', 'Company Name', 'Role', 'URL', 'Location', 'Application Status'],
+        ['Date Applied', 'Job ID', 'Company Name', 'Role', 'Location', 'Application Status'],
         [
           '2026-01-10',
           '1',
           'Acme',
-          'Engineer',
-          'https://jobs.acme.com/open/99',
+          '=HYPERLINK("https://jobs.acme.com/open/99","Engineer")',
           'NYC',
           'Interview',
         ],
@@ -54,7 +53,7 @@ describe('findExistingApplication', () => {
     },
   ];
 
-  test('finds a prior application by URL', () => {
+  test('finds a prior application by URL in the Role hyperlink', () => {
     const hit = findExistingApplication(tabs, {
       url: 'https://jobs.acme.com/open/99?utm_campaign=x',
       company: 'Other',
@@ -68,7 +67,7 @@ describe('findExistingApplication', () => {
     expect(hit.row).toEqual(tabs[0].rows[1]);
   });
 
-  test('still matches after company and role were edited in the sheet', () => {
+  test('still matches after company and role label were edited in the sheet', () => {
     const editedTabs = [
       {
         ...tabs[0],
@@ -78,8 +77,7 @@ describe('findExistingApplication', () => {
             '2026-01-10',
             '99',
             'Acme Corporation',
-            'Software Engineer II',
-            'https://jobs.acme.com/open/99',
+            '=HYPERLINK("https://jobs.acme.com/open/99","Software Engineer II")',
             'NYC',
             'Applied',
           ],
@@ -95,32 +93,15 @@ describe('findExistingApplication', () => {
     expect(hit.matchedBy).toBe('url');
   });
 
-  test('matches via Role HYPERLINK when URL column is empty', () => {
-    const linkTabs = [
-      {
-        ...tabs[0],
-        rows: [
-          tabs[0].rows[0],
-          [
-            '2026-01-10',
-            '99',
-            'Edited Co',
-            '=HYPERLINK("https://jobs.acme.com/open/99","Edited Role")',
-            '',
-            'NYC',
-            'Applied',
-          ],
-        ],
-      },
-    ];
-    const hit = findExistingApplication(linkTabs, {
+  test('matches via Role HYPERLINK when there is no URL column', () => {
+    const hit = findExistingApplication(tabs, {
       url: 'https://jobs.acme.com/open/99',
       company: 'Acme',
       role: 'Engineer',
     });
     expect(hit.matched).toBe(true);
     expect(hit.matchedBy).toBe('url');
-    expect(hit.role).toBe('Edited Role');
+    expect(hit.role).toBe('Engineer');
   });
 
   test('matches by job id when URL and titles differ', () => {
@@ -133,8 +114,7 @@ describe('findExistingApplication', () => {
             '2026-01-10',
             'REQ-998877',
             'Edited Co',
-            'Edited Role',
-            'https://old-ats.example.com/archived/xyz',
+            '=HYPERLINK("https://old-ats.example.com/archived/xyz","Edited Role")',
             'NYC',
             'Applied',
           ],
@@ -152,7 +132,23 @@ describe('findExistingApplication', () => {
   });
 
   test('falls back to company + role', () => {
-    const hit = findExistingApplication(tabs, {
+    const plainTabs = [
+      {
+        ...tabs[0],
+        rows: [
+          tabs[0].rows[0],
+          [
+            '2026-01-10',
+            '1',
+            'Acme',
+            'Engineer',
+            'NYC',
+            'Interview',
+          ],
+        ],
+      },
+    ];
+    const hit = findExistingApplication(plainTabs, {
       url: 'https://careers.acme.com/different-path',
       company: 'Acme',
       role: 'Engineer',
@@ -168,5 +164,33 @@ describe('findExistingApplication', () => {
       role: 'PM',
     });
     expect(hit.matched).toBe(false);
+  });
+
+  test('destination filter ignores matches in other sheets', () => {
+    const multi = [
+      tabs[0],
+      {
+        sheetName: 'Other',
+        tabName: 'Backup',
+        spreadsheetId: 's2',
+        gid: '1',
+        mappings,
+        rows: [tabs[0].rows[0]],
+      },
+    ];
+    const elsewhere = findExistingApplication(
+      multi,
+      { url: 'https://jobs.acme.com/open/99' },
+      { spreadsheetId: 's2', gid: '1' }
+    );
+    expect(elsewhere.matched).toBe(false);
+
+    const sameTab = findExistingApplication(
+      multi,
+      { url: 'https://jobs.acme.com/open/99' },
+      { spreadsheetId: 's1', gid: '0' }
+    );
+    expect(sameTab.matched).toBe(true);
+    expect(sameTab.spreadsheetId).toBe('s1');
   });
 });
