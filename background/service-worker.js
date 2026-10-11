@@ -34,9 +34,15 @@ import {
   registerSidePanel,
   handleSidePanelMessage,
 } from './side-panel.js';
-import { getTabJobData } from './page-job-data.js';
+import {
+  getTabJobData,
+  preloadTabJobData,
+  clearTabJobPreload,
+  registerJobPreloadLifecycle,
+} from './page-job-data.js';
 
 registerSidePanel();
+registerJobPreloadLifecycle();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const sidePanelResult = handleSidePanelMessage(message, sender, sendResponse);
@@ -83,6 +89,15 @@ async function handleMessage(message, sender) {
       const tabId = message.tabId ?? sender.tab?.id;
       const data = await getTabJobData(tabId, message.url || sender.tab?.url || '');
       return { success: true, data };
+    }
+    case 'PRELOAD_TAB_JOB_DATA': {
+      const tabId = message.tabId ?? sender.tab?.id;
+      return preloadTabJobData(tabId, message.url || sender.tab?.url || '');
+    }
+    case 'CLEAR_TAB_JOB_PRELOAD': {
+      const tabId = message.tabId ?? sender.tab?.id;
+      await clearTabJobPreload(tabId);
+      return { success: true };
     }
     case 'APPLY_SCHEMA_CHANGE':
       return applySchemaChangeMessage(message);
