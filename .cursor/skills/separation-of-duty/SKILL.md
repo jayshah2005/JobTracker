@@ -66,7 +66,7 @@ Split duties with **modules imported by that entry**, not a second worker.
 
 **Sheets:** `ADD_SHEET`, `REMOVE_SHEET`, `REFRESH_SHEETS`, `GET_SHEETS`, `SAVE_JOB`, `DELETE_JOB`, `FIND_APPLICATION`, `APPLY_SCHEMA_CHANGE`, `SYNC_TAB_COLUMN_UNIQUES`, `UNDO_SCHEMA_CHANGE`, `GET_UNDO_STACK`, `RENAME_SHEET_TAB`
 
-**Page / panel:** `GET_TAB_JOB_DATA`, `GET_PAGE_JOB_DATA` (content reply), `OPEN_SIDE_PANEL`, `CLOSE_SIDE_PANEL`, `SIDE_PANEL_UNLOADED`, `SIDE_PANEL_STATE` (to content)
+**Page / panel:** `GET_TAB_JOB_DATA`, `PRELOAD_TAB_JOB_DATA`, `CLEAR_TAB_JOB_PRELOAD`, `GET_PAGE_JOB_DATA` (content reply), `OPEN_SIDE_PANEL`, `CLOSE_SIDE_PANEL`, `SIDE_PANEL_UNLOADED`, `SIDE_PANEL_STATE` (to content)
 
 Do not reintroduce orphan types (`GET_OAUTH_SETUP`, `UPDATE_TAB_MAPPINGS`, `TOGGLE_PANEL`, `HIDE_PANEL`) without wiring callers.
 
@@ -95,3 +95,6 @@ Stop and relocate if you notice:
 
 - Keep modules single-purpose; update this map when a **new lasting layer** is introduced (ask before new commit scopes — see `.cursor/rules/git-commit.mdc`).
 - Prefer a one-sentence duty comment at the top of each background module.
+- If message types, module duties, or user-visible flows changed, update
+  [`diagrams/`](../../../diagrams/) in the same turn — follow
+  [keep-diagrams-updated](../keep-diagrams-updated/SKILL.md).
