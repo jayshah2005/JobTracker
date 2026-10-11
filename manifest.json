@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Job Tracker",
-  "version": "1.6.0",
+  "version": "1.0.0",
   "description": "Track job applications in Google Sheets with smart autofill from job postings.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApxl4PUG9mmRIPbXRkfcyzb/linZkpFGaDmie5a6z4tApJoXNVT9bRWjZOZJZlI5Qd/cPfMu3Yfm7niGjKSZjoflOsMhAHexrZl8OO2OTIq72RjCR1ePvcBNTDSwy2NUlgoVxKhdN2eKBkm/GwGlGokx6Zazi+b6kCoZCZ0Mun+O64WptW7Pe0VR761vM9TkfTPX/0NUGd93XrCDdtyxauxnRBuYewIwl8kiLiHvBAFLH/pgDX+beGk6hpWlLcvpTlO1SIMIUSjijBxxtSA3y973cY2pNpJwTo3hcfl8A8mP+dW+zap8LwjFBUg78jQEG746ZDaBxVIlPv2TSMOZb6QIDAQAB",
   "permissions": [
@@ -44,7 +44,9 @@
       "js": [
         "content/content.js"
       ],
-      "type": "module",
+      "css": [
+        "content/floating-panel.css"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -61,6 +63,7 @@
         "content/floating-panel.css",
         "lib/*.js",
         "lib/extractors/*.js",
+        "lib/job-page-url.js",
         "icons/logo.png",
         "icons/icon16.png",
         "icons/icon32.png",
