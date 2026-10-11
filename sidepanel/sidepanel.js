@@ -154,9 +154,8 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   if (!quiet) showView('loading');
   existingMatch = null;
 
-  const [authRes, sheetsRes, settingsFromStore, tab] = await Promise.all([
+  const [authRes, settingsFromStore, tab] = await Promise.all([
     sendMessage({ type: 'GET_AUTH_STATUS' }),
-    sendMessage({ type: 'GET_SHEETS' }),
     getSettings(),
     boundTabId
       ? chrome.tabs.get(boundTabId).catch(() => null)
@@ -186,7 +185,16 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
     return;
   }
 
-  sheets = sheetsRes.sheets || [];
+  // Full opens pull live sheet data so manual Google Sheet edits sync.
+  // Quiet tab navigations keep the cached config for snappy reloads.
+  let sheetsRes = quiet
+    ? await sendMessage({ type: 'GET_SHEETS' })
+    : await sendMessage({ type: 'REFRESH_SHEETS' });
+  if (!quiet && !sheetsRes?.success) {
+    sheetsRes = await sendMessage({ type: 'GET_SHEETS' });
+  }
+
+  sheets = sheetsRes?.sheets || [];
   settings = settingsFromStore;
   destinations = getAllDestinations(sheets);
 
@@ -336,6 +344,17 @@ function setupDestinationPicker(preferredKey = null) {
   }
 }
 
+function destinationMatches(match, dest) {
+  if (!match?.matched || !dest) return false;
+  if (String(match.spreadsheetId) !== String(dest.sheetId)) return false;
+  const gid = String(dest.gid);
+  return (
+    String(match.gid) === gid ||
+    String(match.tabId) === gid ||
+    String(match.tabId) === String(dest.tabId)
+  );
+}
+
 function onDestinationChange(idx) {
   const next = destinations[idx];
   if (!next) return;
@@ -349,6 +368,21 @@ function onDestinationChange(idx) {
     input.dataset.index = String(idx);
   }
   if (combo) combo.dataset.index = String(idx);
+
+  // Same job in another sheet: switching destination leaves edit mode so Save
+  // appends a new row. Switching back to the matched tab restores Update.
+  if (
+    destinationMatches(existingMatch, next) &&
+    existingMatch.rowIndex != null &&
+    Number.isFinite(Number(existingMatch.rowIndex))
+  ) {
+    editingRowIndex = Number(existingMatch.rowIndex);
+    userInputs = rowToFormInputs(next.mappings || [], existingMatch.row || []);
+  } else {
+    editingRowIndex = null;
+  }
+
+  renderEditChrome();
   renderDynamicFields({ preferExistingInputs: true });
   saveDraft();
 }
@@ -546,18 +580,28 @@ async function startEditingExisting() {
 
 function renderEditChrome() {
   const editing = isEditingExisting();
+  const multiDest = shouldShowDestinationPicker(sheets);
+  // With multiple destinations, keep the picker open so a job already in one
+  // sheet can still be added to another.
+  const lockDestination = editing && !multiDest;
   const banner = $('#editing-banner');
   const lockedHint = $('#destination-locked-hint');
   const combo = $('#destination-combo');
   const input = $('#destination-picker-input');
   const label = $('#save-btn-label');
 
-  banner?.classList.toggle('hidden', !editing);
-  lockedHint?.classList.toggle('hidden', !editing);
-  if (combo) combo.classList.toggle('is-disabled', editing);
+  const elsewhere =
+    !editing &&
+    existingMatch?.matched &&
+    selectedDestination &&
+    !destinationMatches(existingMatch, selectedDestination);
+
+  banner?.classList.toggle('hidden', !editing && !elsewhere);
+  lockedHint?.classList.toggle('hidden', !lockDestination);
+  if (combo) combo.classList.toggle('is-disabled', lockDestination);
   if (input) {
-    input.disabled = editing;
-    input.setAttribute('aria-disabled', editing ? 'true' : 'false');
+    input.disabled = lockDestination;
+    input.setAttribute('aria-disabled', lockDestination ? 'true' : 'false');
   }
 
   if (editing && existingMatch) {
@@ -568,8 +612,19 @@ function renderEditChrome() {
     const where = existingMatch.tabName
       ? ` in ${existingMatch.sheetName ? `${existingMatch.sheetName} → ` : ''}${existingMatch.tabName}`
       : '';
+    const switchHint = multiDest
+      ? ' Choose another destination below to save a copy there.'
+      : '';
+    $('#editing-banner-title').textContent = 'Editing saved application';
     $('#editing-banner-meta').textContent =
-      `Update any field (status, notes, etc.)${status}${when}${where}.`;
+      `Update any field (status, notes, etc.)${status}${when}${where}.${switchHint}`;
+  } else if (elsewhere) {
+    const where = existingMatch.tabName
+      ? `${existingMatch.sheetName ? `${existingMatch.sheetName} → ` : ''}${existingMatch.tabName}`
+      : 'another sheet';
+    $('#editing-banner-title').textContent = 'Already in another sheet';
+    $('#editing-banner-meta').textContent =
+      `Saved in ${where}. Saving here will add a separate copy to this destination.`;
   }
 
   if (label) {
@@ -1128,7 +1183,12 @@ async function handleSave() {
   }
 
   const btn = $('#save-btn');
-  const editing = isEditingExisting();
+  // Only treat as update when the selected destination is the matched row's sheet.
+  // Otherwise append a copy — even if we still have an editingRowIndex from before.
+  const editing =
+    isEditingExisting() &&
+    (!existingMatch?.matched ||
+      destinationMatches(existingMatch, selectedDestination));
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span>${editing ? 'Updating…' : 'Saving…'}`;
 
@@ -1150,11 +1210,12 @@ async function handleSave() {
     const res = await sendMessage(payload);
 
     if (res.alreadyApplied && res.match) {
-      // Happens if Update was attempted without a row index — recover into edit mode.
+      // Duplicate only for this destination — open that row for edit.
       existingMatch = res.match;
       enterEditMode(res.match);
       showStatus(
-        'Already in your tracker. Make your edits again, then click Update tracker.',
+        res.error ||
+          'Already in this sheet. Update it here, or pick another destination to add a copy.',
         'error'
       );
       return;

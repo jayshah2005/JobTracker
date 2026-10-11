@@ -1,19 +1,49 @@
 import {
   prepareTabConfig,
+  shouldSeedDefaultHeaders,
   countDestinations,
   getAllDestinations,
   shouldShowDestinationPicker,
   mergeTabMappings,
   findDestination,
 } from '../lib/sheet-config.js';
-import { FIELD_TAGS } from '../lib/constants.js';
+import { FIELD_TAGS, LEGACY_DEFAULT_HEADERS } from '../lib/constants.js';
 
 describe('prepareTabConfig', () => {
   test('creates default headers for empty sheet', () => {
     const config = prepareTabConfig('Sheet1', 'id1', '0', []);
     expect(config.isNew).toBe(true);
-    expect(config.headers).toHaveLength(7);
+    expect(config.headers).toHaveLength(6);
+    expect(config.headers).not.toContain('URL');
+    expect(config.headers).toContain('Role');
     expect(config.mappings[0].tag).toBe(FIELD_TAGS.DATE_APPLIED);
+  });
+
+  test('upgrades header-only legacy defaults (with URL) to current defaults', () => {
+    const config = prepareTabConfig('Sheet1', 'id1', '0', [
+      [...LEGACY_DEFAULT_HEADERS],
+    ]);
+    expect(shouldSeedDefaultHeaders([[...LEGACY_DEFAULT_HEADERS]])).toBe(true);
+    expect(config.isNew).toBe(true);
+    expect(config.headers).not.toContain('URL');
+    expect(config.headers).toEqual([
+      'Date Applied',
+      'Job ID',
+      'Company Name',
+      'Role',
+      'Location',
+      'Application Status',
+    ]);
+  });
+
+  test('keeps legacy headers when the sheet already has data rows', () => {
+    const rows = [
+      [...LEGACY_DEFAULT_HEADERS],
+      ['2026-01-01', '1', 'Acme', 'Eng', 'https://x.com', 'NYC', 'Applied'],
+    ];
+    const config = prepareTabConfig('Jobs', 'id1', '0', rows);
+    expect(config.isNew).toBe(false);
+    expect(config.headers).toContain('URL');
   });
 
   test('maps existing headers', () => {

@@ -57,11 +57,21 @@ describe('isSheetEmpty', () => {
 });
 
 describe('buildDefaultMappings', () => {
-  test('creates 7 default mappings', () => {
+  test('creates 6 default mappings without a separate URL column', () => {
     const mappings = buildDefaultMappings();
-    expect(mappings).toHaveLength(7);
+    expect(mappings).toHaveLength(6);
+    expect(mappings.map((m) => m.header)).toEqual([
+      'Date Applied',
+      'Job ID',
+      'Company Name',
+      'Role',
+      'Location',
+      'Application Status',
+    ]);
     expect(mappings[0].tag).toBe(FIELD_TAGS.DATE_APPLIED);
     expect(mappings[2].tag).toBe(FIELD_TAGS.COMPANY_NAME);
+    expect(mappings[3].tag).toBe(FIELD_TAGS.ROLE);
+    expect(mappings.some((m) => m.tag === FIELD_TAGS.URL)).toBe(false);
     const status = mappings.find((m) => m.header === 'Application Status');
     expect(status.tag).toBe(FIELD_TAGS.CUSTOM_DROPDOWN);
     expect(status.dropdownOptions).toEqual(
@@ -108,8 +118,15 @@ describe('generateNextId', () => {
 describe('buildRowFromMappings', () => {
   const mappings = buildDefaultMappings();
   const rows = [
-    ['Date Applied', 'ID', 'Company Name', 'Role', 'URL', 'Location', 'Application Status'],
-    ['2025-01-01', '1', 'Acme', 'Engineer', 'http://a.com', 'NYC', 'Applied'],
+    ['Date Applied', 'Job ID', 'Company Name', 'Role', 'Location', 'Application Status'],
+    [
+      '2025-01-01',
+      '1',
+      'Acme',
+      '=HYPERLINK("http://a.com","Engineer")',
+      'NYC',
+      'Applied',
+    ],
   ];
 
   test('builds row from extracted data', () => {
@@ -125,14 +142,14 @@ describe('buildRowFromMappings', () => {
       },
       {}
     );
+    expect(row).toHaveLength(6);
     expect(row[1]).toBe('998877');
     expect(row[2]).toBe('Google');
     expect(row[3]).toBe(
       '=HYPERLINK("https://careers.google.com/jobs/results/998877","SWE")'
     );
-    expect(row[4]).toBe('https://careers.google.com/jobs/results/998877');
-    expect(row[5]).toBe('Mountain View');
-    expect(row[6]).toBe('Applied');
+    expect(row[4]).toBe('Mountain View');
+    expect(row[5]).toBe('Applied');
   });
 
   test('fills job id from the posting URL when not extracted on-page', () => {
@@ -161,10 +178,23 @@ describe('buildRowFromMappings', () => {
     expect(row[3]).toBe('Manual Role');
   });
 
-  test('keeps page URL when the form URL field was cleared', () => {
+  test('keeps page URL in Role hyperlink when a legacy URL column was cleared', () => {
+    const withUrlCol = [
+      ...mappings.slice(0, 4),
+      {
+        columnIndex: 4,
+        header: 'URL',
+        tag: FIELD_TAGS.URL,
+        dropdownOptions: [],
+        dropdownDefault: '',
+      },
+      ...mappings.slice(4).map((m) => ({ ...m, columnIndex: m.columnIndex + 1 })),
+    ];
     const row = buildRowFromMappings(
-      mappings,
-      rows,
+      withUrlCol,
+      [
+        ['Date Applied', 'Job ID', 'Company Name', 'Role', 'URL', 'Location', 'Application Status'],
+      ],
       {
         company: 'Acme',
         role: 'Engineer',
@@ -177,6 +207,9 @@ describe('buildRowFromMappings', () => {
       }
     );
     expect(row[2]).toBe('Acme Corporation');
+    expect(row[3]).toBe(
+      '=HYPERLINK("https://jobs.acme.com/open/99","Software Engineer")'
+    );
     expect(row[4]).toBe('https://jobs.acme.com/open/99');
   });
 
@@ -520,8 +553,7 @@ describe('date applied on save', () => {
       '9/19/2026',
       '1',
       'Acme',
-      'Eng',
-      'https://x.com',
+      '=HYPERLINK("https://x.com","Eng")',
       'NYC',
       'Applied',
     ]);
@@ -538,7 +570,6 @@ describe('rowToFormInputs', () => {
       '99',
       'Acme Corp',
       '=HYPERLINK("https://jobs.acme.com/open/99","Engineer")',
-      'https://jobs.acme.com/open/99',
       'NYC',
       'Not Applied',
     ]);
@@ -546,9 +577,9 @@ describe('rowToFormInputs', () => {
     expect(inputs.company_name).toBe('Acme Corp');
     expect(inputs.col_3).toBe('Engineer');
     expect(inputs.role).toBe('Engineer');
-    expect(inputs.col_4).toBe('https://jobs.acme.com/open/99');
-    expect(inputs.col_6).toBe('Not Applied');
-    expect(inputs.dropdown_6).toBe('Not Applied');
+    expect(inputs.col_4).toBe('NYC');
+    expect(inputs.col_5).toBe('Not Applied');
+    expect(inputs.dropdown_5).toBe('Not Applied');
   });
 });
 
