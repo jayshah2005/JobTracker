@@ -35,7 +35,7 @@ Job Tracker saves job applications to Google Sheets you already own.
 
 How it works
 • Open a job posting in Chrome
-• Open the Job Tracker sidebar (toolbar or the floating button on job pages)
+• Open the Job Tracker sidebar (toolbar icon anytime, or the floating button on a single job posting)
 • Review autofilled fields (company, role, URL, and more)
 • Save — or update an existing row if you already tracked this job
 
@@ -119,7 +119,7 @@ Host access is required for two purposes only:
 If the form asks separately for **\<all_urls\>** / content script matches:
 
 ```
-Required so users can track applications from any job board or company careers site. A content script detects likely job pages, shows an optional floating “Job Tracker” button, and helps autofill fields from the current page. Users control saving; nothing is written without their action.
+Required so users can track applications from any job board or company careers site. A content script detects single job posting pages (URL shape, schema.org JobPosting, or application-page structure — not careers indexes or inboxes), shows an optional floating “Job Tracker” button, and helps autofill fields from the current page. Dedicated extractors cover common ATS and boards (including Greenhouse, Workday, LinkedIn, and Indeed). Users control saving; nothing is written without their action.
 ```
 
 If asked separately for **Google API hosts**:

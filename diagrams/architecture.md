@@ -77,30 +77,28 @@ flowchart LR
   load[Tab loads / SPA navigates] --> top{Top frame?}
   top -->|no| idleFrame[Frame silent except extract replies]
   top -->|yes| url{classifyJobUrl<br/>path + query, never #hash}
-  url -->|posting| detect
+  url -->|posting| jobPage[Likely job page]
   url -->|careers / none| ats{Host ATS + job id?}
-  ats -->|yes| detect
+  ats -->|yes| jobPage
   ats -->|no| schema{1–2 JobPosting<br/>JSON-LD / microdata?}
-  schema -->|yes| detect
+  schema -->|yes| jobPage
   schema -->|no| score[DOM score ≥ 4<br/>+apply control +JD headings<br/>+employment terms +careers URL/host<br/>−app-shell grid −editor −listing]
-  score -->|yes| detect[Likely job page]
-  score -->|no| clear
+  score -->|yes| jobPage
+  score -->|no| clear[CLEAR_TAB_JOB_PRELOAD]
 
-  detect -->|no| clear[CLEAR_TAB_JOB_PRELOAD]
-  detect -->|yes| debounce[Debounce 400ms]
-
+  jobPage --> debounce[Debounce 400ms]
   debounce --> preload[PRELOAD_TAB_JOB_DATA]
   preload --> extract[getTabJobData bypassCache]
   extract --> frames[Content reply + allFrames executeScript]
   frames --> pick[pickBestExtraction]
   pick --> cache[(session jobPreload:tabId<br/>url + data + cachedAt)]
 
-  detect -->|yes and autoShow| launcher[Show floating launcher]
+  jobPage -->|autoShow| launcher[Show floating launcher]
   launcher -->|click| open[OPEN_SIDE_PANEL]
 ```
 
 - Detection (`isLikelyJobPage` / `jobPageSignals` in `lib/job-extractor.js`) is platform-general: URL shapes, schema.org JobPosting, and structural DOM signals — no site allow/block lists. Loose body keywords (“job”, “apply”) are never enough on their own, so inboxes and other app shells stay negative.
-- Full extract is DOM-only (no network) but heavier — preload only runs on likely job pages.
+- Full extract is DOM-only (no network) but heavier — preload only runs on likely job pages. Pipelines: Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, Indeed, then general JSON-LD (one or two `JobPosting` nodes only).
 - Cache TTL is 5 minutes; tab close / URL change clears it.
 - Launcher CSS is injected via `manifest.json` `content_scripts.css` (CSP-safe); AutoShow is Settings → “Show Job Tracker button on job pages”.
 - Content script is a **classic** (non-module) bootstrap with dynamic `import()` of libs. A general URL helper (`lib/job-page-url.js` → `classifyJobUrl` / `urlLooksLikeJobPosting`) short-circuits on posting-shaped URLs (job word + id/slug, job-id query params, jobs/careers hosts + id), then full DOM detection refines.
@@ -245,7 +243,8 @@ flowchart TB
 
 | Piece | Job |
 |--------|-----|
-| **Content script** | Spot job pages, show launcher, ask for preload, answer scrape requests |
+| **Content script** | Detect single postings (`classifyJobUrl` / `isLikelyJobPage`), show launcher, ask for preload, answer scrape requests |
+| **job-extractor + extractors/\*** | ATS pipelines (incl. LinkedIn, Indeed) + general JSON-LD/DOM fusion |
 | **Side panel** | Human form: review fields, pick sheet, save/update/delete |
 | **Options** | Connect spreadsheets, edit columns/types, prefs |
 | **Connect** | One-time Google OAuth client setup |

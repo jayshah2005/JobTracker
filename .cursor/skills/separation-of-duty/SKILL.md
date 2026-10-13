@@ -38,9 +38,9 @@ If placement is ambiguous, ask the user before inventing a new top-level folder.
 | Side panel chrome | `background/side-panel.js` | `chrome.sidePanel`, action click, `SIDE_PANEL_STATE` notify | Auth; Sheets; form UI |
 | Page job data | `background/page-job-data.js` | `GET_TAB_JOB_DATA` (frames + extract) | Sheets; side panel chrome |
 | Domain libs | `lib/*.js` | Auth helpers, Sheets HTTP, storage, extract, map, schema, duplicates | Extension UI markup; page injection chrome |
-| ATS extractors | `lib/extractors/*` | Site-specific job DOM/JSON pipelines; routed by `job-extractor.js` | Sheets; side panel; Chrome messaging |
+| ATS extractors | `lib/extractors/*` | Site-specific pipelines (Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, Indeed); routed by `job-extractor.js` | Sheets; side panel; Chrome messaging |
 | Sidebar UI | `sidepanel/*` | Side panel HTML/CSS/JS, drafts, save form | Direct Sheets HTTP; `setOptions`; `executeScript` extract |
-| Page UI | `content/*` | Job-page detection, floating launcher, `GET_PAGE_JOB_DATA` reply | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
+| Page UI | `content/*` | Job-page detection (`classifyJobUrl` / `isLikelyJobPage`), floating launcher, `GET_PAGE_JOB_DATA` reply | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
 | Settings | `options/*` | Settings UI; use `lib/storage` for prefs | Background chrome wiring; raw Sheets HTTP |
 | Connect | `connect/*` | First-time OAuth client setup UI | Side panel; job extraction |
 | Tests | `tests/*` | Jest coverage for `lib/` | Duplicating production logic |
@@ -54,7 +54,8 @@ Split duties with **modules imported by that entry**, not a second worker.
 
 - **Auth / tokens / OAuth** → `lib/google-auth.js` + `lib/oauth-config.js` + `lib/storage.js`; session orchestration in `background/google-session.js`. Published store credentials are injected at pack time (see `store/PUBLISHER_OAUTH.md`), not committed.
 - **Sheets read/write / headers** → `lib/sheets-api.js`; orchestration in `background/sheets-orchestrator.js`.
-- **Job page parsing** → `lib/job-extractor.js`; multi-frame collection via `GET_TAB_JOB_DATA` / `page-job-data.js`.
+- **Job page detection** → `lib/job-page-url.js` (`classifyJobUrl`) + `isLikelyJobPage` / `jobPageSignals` in `lib/job-extractor.js`; launcher gated in `content/content.js`.
+- **Job page parsing** → `lib/job-extractor.js` + `lib/extractors/*`; multi-frame collection via `GET_TAB_JOB_DATA` / `page-job-data.js`.
 - **Open/close sidebar** → `background/side-panel.js` only publishes `SIDE_PANEL_STATE`.
 - **Settings prefs** → `getSettings` / `saveSettings` in `lib/storage.js` (not raw `chrome.storage.local` keys).
 - **User-visible sidebar form** → `sidepanel/`; drafts via session storage OK.

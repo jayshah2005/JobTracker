@@ -26,6 +26,8 @@ If you’ve already saved that job, you’ll see **Already applied** and it won�
 - Share extra sheets with the same Google account, then paste more links. No extra sign-in.
 - The destination picker appears only when you have more than one tab.
 - Changing column names in Settings rewrites the sheet header — you’ll get a warning, and Undo is available.
+- The floating **Job Tracker** button appears only on a **single job posting** (not careers indexes, search results, or inboxes). The toolbar icon still opens the sidebar on any tab.
+- Dedicated extractors cover Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, and Indeed; other sites use schema.org JobPosting and DOM heuristics.
 
 ## Troubleshooting
 
@@ -38,7 +40,7 @@ If you’ve already saved that job, you’ll see **Already applied** and it won�
 | Client secret / invalid client | Re-copy Client ID and secret from the same OAuth client into Job Tracker and save. |
 | Can’t edit spreadsheet | Sign in with an account that already has Editor access on that sheet. |
 | Autofill missing | Fill the field in the sidebar — some sites don’t expose job data. |
-| Panel doesn’t appear | Enable “Show Job Tracker button on job pages” in Settings. |
+| Floating button missing | Open a single posting URL (not a jobs search or careers home), or use the toolbar icon. Enable “Show Job Tracker button on job pages” in Settings. |
 
 ## Publish (Chrome Web Store)
 
