@@ -213,6 +213,47 @@ describe('isLikelyJobPage', () => {
     const doc = parseHtml(html);
     expect(isLikelyJobPage('https://example.com/about', doc)).toBe(false);
   });
+
+  test('detects a posting with no URL hint from DOM structure', () => {
+    const html = `
+      <main>
+        <h1>Senior Product Designer</h1>
+        <h2>About the role</h2><p>Design things.</p>
+        <h2>Responsibilities</h2><ul><li>Ship</li></ul>
+        <h2>Qualifications</h2><p>5+ years of experience. Full-time.</p>
+        <p>Salary: $150k. We are an equal opportunity employer.</p>
+        <a href="/form">Apply now</a>
+      </main>`;
+    const doc = parseHtml(html, 'https://acme.example/p/9f');
+    expect(isLikelyJobPage('https://acme.example/p/9f', doc)).toBe(true);
+  });
+
+  test('rejects mail/app shells that mention jobs and apply', () => {
+    const rows = Array.from(
+      { length: 40 },
+      (_, i) => `<tr role="row"><td>Job alert: Software Engineer intern at Co${i} — apply now</td>
+        <td><a href="https://www.linkedin.com/jobs/view/${1000 + i}">View job</a></td></tr>`
+    ).join('');
+    const html = `
+      <title>Inbox (40) - me@example.com - Mail</title>
+      <div role="main"><table role="grid">${rows}</table>
+        <button>Apply</button>
+        <strong>Requirements</strong><strong>Responsibilities</strong>
+      </div>`;
+    const url = 'https://mail.google.com/mail/u/0/#inbox';
+    expect(isLikelyJobPage(url, parseHtml(html, url))).toBe(false);
+  });
+
+  test('rejects listing pages with many posting links', () => {
+    const links = Array.from(
+      { length: 20 },
+      (_, i) => `<li><a href="https://acme.example/jobs/role-${i}">Role ${i}</a></li>`
+    ).join('');
+    const html = `<main><h1>Open roles</h1><ul>${links}</ul><a href="#">Apply</a>
+      <h3>Benefits</h3><p>Full-time and part-time roles.</p></main>`;
+    const url = 'https://acme.example/careers';
+    expect(isLikelyJobPage(url, parseHtml(html, url))).toBe(false);
+  });
 });
 
 describe('normalizeDate', () => {
