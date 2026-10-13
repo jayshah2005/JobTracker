@@ -76,7 +76,15 @@ flowchart TB
 flowchart LR
   load[Tab loads / SPA navigates] --> top{Top frame?}
   top -->|no| idleFrame[Frame silent except extract replies]
-  top -->|yes| detect[isLikelyJobPage]
+  top -->|yes| url{classifyJobUrl<br/>path + query, never #hash}
+  url -->|posting| detect
+  url -->|careers / none| ats{Host ATS + job id?}
+  ats -->|yes| detect
+  ats -->|no| schema{1–2 JobPosting<br/>JSON-LD / microdata?}
+  schema -->|yes| detect
+  schema -->|no| score[DOM score ≥ 4<br/>+apply control +JD headings<br/>+employment terms +careers URL/host<br/>−app-shell grid −editor −listing]
+  score -->|yes| detect[Likely job page]
+  score -->|no| clear
 
   detect -->|no| clear[CLEAR_TAB_JOB_PRELOAD]
   detect -->|yes| debounce[Debounce 400ms]
@@ -91,11 +99,11 @@ flowchart LR
   launcher -->|click| open[OPEN_SIDE_PANEL]
 ```
 
-- Detection is cheap (ATS host, `/jobs/` paths, JSON-LD, keywords).
+- Detection (`isLikelyJobPage` / `jobPageSignals` in `lib/job-extractor.js`) is platform-general: URL shapes, schema.org JobPosting, and structural DOM signals — no site allow/block lists. Loose body keywords (“job”, “apply”) are never enough on their own, so inboxes and other app shells stay negative.
 - Full extract is DOM-only (no network) but heavier — preload only runs on likely job pages.
 - Cache TTL is 5 minutes; tab close / URL change clears it.
 - Launcher CSS is injected via `manifest.json` `content_scripts.css` (CSP-safe); AutoShow is Settings → “Show Job Tracker button on job pages”.
-- Content script is a **classic** (non-module) bootstrap with dynamic `import()` of libs. A general URL helper (`lib/job-page-url.js` → `urlLooksLikeJobPosting`) gates the launcher from path/ATS-host patterns (not employer- or posting-specific), then full DOM detection refines.
+- Content script is a **classic** (non-module) bootstrap with dynamic `import()` of libs. A general URL helper (`lib/job-page-url.js` → `classifyJobUrl` / `urlLooksLikeJobPosting`) short-circuits on posting-shaped URLs (job word + id/slug, job-id query params, jobs/careers hosts + id), then full DOM detection refines.
 
 ---
 

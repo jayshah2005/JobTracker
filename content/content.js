@@ -71,7 +71,6 @@ function loadLibs() {
 
 function pageLooksLikeJob() {
   if (jobPageUrlMod?.urlLooksLikeJobPosting?.(location.href)) return true;
-  if (jobPageUrlMod?.isKnownAtsJobUrl?.(location.href)) return true;
   if (extractorMod?.isLikelyJobPage) {
     try {
       return extractorMod.isLikelyJobPage(location.href, document);
