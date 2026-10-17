@@ -142,11 +142,11 @@ GitHub Pages in this repo serves:
 
 | OAuth Branding field | URL |
 |----------------------|-----|
-| Application home page | https://jayshah2005.github.io/JobTracker/ |
-| Application privacy policy | https://jayshah2005.github.io/JobTracker/privacy.html |
+| Application home page | https://jobtracker.jayshah.xyz/ |
+| Application privacy policy | https://jobtracker.jayshah.xyz/privacy.html |
 
 Edit the privacy draft in `store/LISTING_COPY.md` and push — `privacy.html` reads it on load.
-Authorized domain: `github.io`.
+Authorized domain: `jayshah.xyz`.
 
 Add the same URLs to:
 - Chrome Web Store → Privacy practices (privacy URL)

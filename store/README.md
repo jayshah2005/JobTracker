@@ -38,8 +38,8 @@ Store icon: use `icons/icon128.png` (generated from the brand mark).
 3. Run `npm test` and `npm run pack` (pack injects OAuth from `.env.oauth`).
 4. Host site URLs on GitHub Pages: home `index.html` + `privacy.html` (privacy
    loads the draft from `LISTING_COPY.md`). Use
-   https://jayshah2005.github.io/JobTracker/ and
-   https://jayshah2005.github.io/JobTracker/privacy.html in Store + OAuth Branding.
+   https://jobtracker.jayshah.xyz/ and
+   https://jobtracker.jayshah.xyz/privacy.html in Store + OAuth Branding.
 5. Copy answers from [`LISTING_COPY.md`](LISTING_COPY.md) into the Privacy practices and Store listing tabs.
 6. Verify publisher contact email under Dashboard → Settings.
 7. After Chrome assigns a store extension ID, add  

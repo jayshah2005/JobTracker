@@ -171,8 +171,8 @@ The store and Google OAuth branding require public URLs:
 
 | Field | URL |
 |-------|-----|
-| Application home page | https://jayshah2005.github.io/JobTracker/ |
-| Privacy policy | https://jayshah2005.github.io/JobTracker/privacy.html |
+| Application home page | https://jobtracker.jayshah.xyz/ |
+| Privacy policy | https://jobtracker.jayshah.xyz/privacy.html |
 
 Home page is root `index.html`. Privacy page (`privacy.html`) loads the draft
 below from this file on page load — edit the fenced block and push.
@@ -182,42 +182,54 @@ below from this file on page load — edit the fenced block and push.
 
 ```
 Privacy Policy — Job Tracker Chrome Extension
-Last updated: Oct 10, 2026
+Last updated: Oct 17, 2026
 
 Job Tracker (“the Extension”) helps you save job application information from web pages into Google Spreadsheets that you control.
 
 1. Who we are
 Jay, publisher of Job Tracker. Contact: jayshah3616@gmail.com
 
-2. Data we handle
-• Google OAuth tokens and client configuration you enter, stored in Chrome’s extension storage on your device
-• Spreadsheet IDs, tab names, and column mappings you configure
-• Job application fields you review and save (for example company, role, URL, location, status, notes)
-• Optional UI preferences (for example whether to show the on-page button)
+2. Google user data we access
+• Google OAuth access and refresh tokens used to call the Google Sheets API on your behalf
+• Spreadsheet identifiers, tab names, and header/column mappings for sheets you explicitly link
+• Spreadsheet cell values the Extension reads or writes when you save or update a job application (for example company, role, URL, location, status, notes)
+• Optional UI preferences stored only on your device (for example whether to show the on-page button)
 
-3. How data is used
+We do not request access to Gmail, Google Drive file libraries beyond Sheets API calls for spreadsheets you link, Contacts, Calendar, or other Google products.
+
+3. How Google user data is used
 • To authenticate with Google and read/write rows in spreadsheets you link
-• To autofill and display job fields in the Extension UI
-• We do not sell your data, use it for advertising, or share it with data brokers
+• To autofill and display job fields in the Extension UI for you to review before saving
+• Only to provide or improve these user-facing Job Tracker features
 
-4. Where data goes
-• Chrome storage on your device
+We do not sell Google user data, use it for advertising or credit decisions, or share it with data brokers. Raw or derived Google user data from Workspace APIs (including Sheets) is not used to develop, improve, or train generalized AI/ML models, and is not transferred to third-party AI/ML services for model training. Use of data received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.
+
+4. Where data goes / transfer
+• Chrome extension storage on your device (tokens, sheet configuration, UI preferences)
 • Google’s servers, when you sign in and when Sheets API requests are made on your behalf
-• The Extension does not send your job data to a separate Job Tracker backend
+• The Extension does not send your job data or Google user data to a separate Job Tracker backend or other third-party application servers
 
-5. Third parties
-Google (Accounts / OAuth / Sheets) under Google’s terms and privacy policy. You must use a Google account and grant access.
+5. Data protection
+• OAuth tokens and configuration are stored in Chrome’s extension storage on your device and are not uploaded to Job Tracker servers (there is no Job Tracker backend)
+• Communication with Google OAuth and the Google Sheets API uses HTTPS
+• Access to your spreadsheets requires your Google sign-in and your grant of the Spreadsheets scope; the Extension only operates on spreadsheet links you paste and that your Google account can edit
+• We do not maintain a separate cloud database of your sheet contents
 
-6. Retention
-Local settings and tokens remain until you clear extension data, uninstall, or sign out (tokens removed on sign-out). Spreadsheet data remains in your Google Sheets under your control.
+6. Retention and deletion of Google user data
+• OAuth tokens: kept in local Chrome storage until you sign out of Job Tracker, clear the Extension’s data in Chrome, or uninstall the Extension. Signing out removes stored tokens from the Extension.
+• Sheet configuration (IDs, tabs, column mappings) and UI preferences: kept locally until you remove them in Settings, clear Extension data, or uninstall
+• Spreadsheet contents: retained in your Google Sheets under your Google account’s retention controls. Deleting a row via Job Tracker (when you use delete) removes or updates that data in your sheet; uninstalling Job Tracker does not delete your Google Sheet. You can revoke Job Tracker’s access at any time in your Google Account permissions (Third-party access / Data & privacy) and delete sheet data directly in Google Sheets
 
-7. Children’s privacy
+7. Third parties
+Google (Accounts / OAuth / Sheets) under Google’s terms and privacy policy. You must use a Google account and grant access. No other third parties receive your Google user data from Job Tracker.
+
+8. Children’s privacy
 Not directed at children under 13.
 
-8. Changes
+9. Changes
 We may update this policy; the “Last updated” date will change.
 
-9. Contact
+10. Contact
 jayshah3616@gmail.com
 ```
 
