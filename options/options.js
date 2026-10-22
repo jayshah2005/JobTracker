@@ -27,6 +27,7 @@ import {
   clearDefaultDestinationForSheet,
 } from '../lib/storage.js';
 import { getAllDestinations } from '../lib/sheet-config.js';
+import { choiceDialog, confirmDialog, promptDialog } from '../lib/dialog.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -1310,9 +1311,15 @@ async function applyChange(spreadsheetId, tabId, change) {
 
   if (destructive) {
     const extra = willSyncNow
-      ? '\n\nThis will rewrite the header row in Google Sheets right away.'
-      : '\n\nHeaders will be written to Google Sheets when this new tab is seeded.';
-    if (!confirm(`${DESTRUCTIVE_WARNING}${extra}\n\nContinue?`)) {
+      ? 'Job Tracker will update the header row in your Google Sheet right away.'
+      : 'The headers will be written to your Google Sheet when this new tab is set up.';
+    const ok = await confirmDialog({
+      title: 'Change your sheet columns?',
+      message: `${DESTRUCTIVE_WARNING}\n\n${extra}\n\nIf you cancel, nothing is changed.`,
+      confirmLabel: willSyncNow ? 'Rewrite header' : 'Apply change',
+      danger: true,
+    });
+    if (!ok) {
       renderSheetList(); // revert any optimistic UI (e.g. picked field type)
       return null;
     }
@@ -1550,10 +1557,31 @@ async function onColumnAction(e) {
   const columnIndex = parseInt(btn.dataset.col, 10);
 
   if (action === 'delete') {
-    await applyChange(spreadsheetId, tabId, {
-      op: SCHEMA_OPS.DELETE,
-      columnIndex,
+    const mapping = getMapping(spreadsheetId, tabId, columnIndex);
+    const name = mapping?.header || `column ${columnIndex + 1}`;
+    const choice = await choiceDialog({
+      title: `Remove “${name}”?`,
+      message:
+        'Still want this column in your sheet, just not filled in by Job Tracker? Hide it from the form instead. The column and its data stay in Google Sheets, and new rows simply leave it blank.' +
+        '\n\nOr delete the column from the sheet header. Data already in that column may no longer line up, but you can undo this from Settings.',
+      choices: [
+        { value: 'hide', label: 'Hide from the form', variant: 'primary' },
+        { value: 'delete', label: 'Delete column', variant: 'danger' },
+      ],
+      defaultChoice: 'hide',
     });
+    if (choice === 'hide') {
+      await applyChange(spreadsheetId, tabId, {
+        op: SCHEMA_OPS.CHANGE_TAG,
+        columnIndex,
+        newTag: FIELD_TAGS.IGNORE,
+      });
+    } else if (choice === 'delete') {
+      await applyChange(spreadsheetId, tabId, {
+        op: SCHEMA_OPS.DELETE,
+        columnIndex,
+      });
+    }
     return;
   }
 
@@ -1574,13 +1602,23 @@ async function onColumnAction(e) {
 
 async function onAddColumn(e) {
   const btn = e.currentTarget;
-  const name = prompt('New column name:', 'Notes');
-  if (name == null) return;
-  const trimmed = name.trim();
-  if (!trimmed) {
-    showStatus('Column name cannot be empty.', 'error');
-    return;
-  }
+  const sheet = sheets.find((s) => s.spreadsheetId === btn.dataset.sheet);
+  const tab = sheet?.tabs?.find((t) => String(t.gid) === String(btn.dataset.tab));
+  const taken = new Set((tab?.headers || []).map((h) => String(h).trim().toLowerCase()));
+  const trimmed = await promptDialog({
+    title: 'Add a column',
+    message:
+      'The new column is added to the end of the header row in your Google Sheet. You can undo this from Settings. If you cancel, nothing is changed.',
+    label: 'Column name',
+    defaultValue: 'Notes',
+    confirmLabel: 'Add column',
+    validate: (v) => {
+      if (!v) return 'Please enter a column name.';
+      if (taken.has(v.toLowerCase())) return `Your sheet already has a column called “${v}”. Pick a different name.`;
+      return '';
+    },
+  });
+  if (trimmed == null) return;
 
   await applyChange(btn.dataset.sheet, btn.dataset.tab, {
     op: SCHEMA_OPS.ADD,
@@ -1634,7 +1672,14 @@ const handleRedo = (entryId) => runHistoryStep('redo', entryId);
 /** Disconnect a spreadsheet from the extension (the Google Sheet itself is untouched). */
 async function handleRemoveSheet(spreadsheetId) {
   const name = sheets.find((s) => s.spreadsheetId === spreadsheetId)?.name || 'this spreadsheet';
-  if (!confirm(`Remove “${name}” from Job Tracker?\n\nThe Google Sheet itself is not deleted.`)) return;
+  const ok = await confirmDialog({
+    title: `Disconnect “${name}”?`,
+    message:
+      'Job Tracker will stop saving to this spreadsheet and forget its column settings. The Google Sheet and everything in it stay exactly as they are. You can add it again later by pasting its link.\n\nIf you cancel, nothing changes.',
+    confirmLabel: 'Disconnect sheet',
+    danger: true,
+  });
+  if (!ok) return;
 
   try {
     const res = await sendMessage({ type: 'REMOVE_SHEET', spreadsheetId });

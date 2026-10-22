@@ -41,6 +41,7 @@ import {
 } from '../lib/sheet-config.js';
 import { getSettings, saveSettings } from '../lib/storage.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
+import { confirmDialog } from '../lib/dialog.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -1599,13 +1600,13 @@ async function handleDeleteExisting() {
   const role = existingMatch?.role || extractedData.role || 'this application';
   const company = existingMatch?.company || extractedData.company || '';
   const label = company ? `${role} at ${company}` : role;
-  if (
-    !confirm(
-      `Remove “${label}” from your Google Sheet?\n\nThis deletes the row in Sheets and cannot be undone from Job Tracker.`
-    )
-  ) {
-    return;
-  }
+  const confirmed = await confirmDialog({
+    title: 'Delete this application?',
+    message: `This deletes the row for “${label}” from your Google Sheet. Job Tracker cannot undo this, although you may be able to restore it from the sheet’s version history in Google Sheets.\n\nIf you cancel, the row stays where it is.`,
+    confirmLabel: 'Delete row',
+    danger: true,
+  });
+  if (!confirmed) return;
 
   const appliedBtn = $('#delete-existing-btn');
   const editingBtn = $('#delete-editing-btn');

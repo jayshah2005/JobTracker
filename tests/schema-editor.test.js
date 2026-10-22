@@ -199,3 +199,18 @@ describe('schema-editor', () => {
     expect(DESTRUCTIVE_WARNING.toLowerCase()).toContain('existing');
   });
 });
+
+describe('hide column (retag to Ignore)', () => {
+  test('CHANGE_TAG to ignore keeps the header and is not destructive', () => {
+    const headers = ['Company', 'Salary'];
+    const mappings = [
+      { columnIndex: 0, header: 'Company', tag: 'company_name', dropdownOptions: [] },
+      { columnIndex: 1, header: 'Salary', tag: 'custom_dropdown', dropdownOptions: ['a'] },
+    ];
+    const r = applySchemaChange(headers, mappings, { op: SCHEMA_OPS.CHANGE_TAG, columnIndex: 1, newTag: FIELD_TAGS.IGNORE });
+    expect(r.headers).toEqual(headers);
+    expect(r.syncHeaders).toBe(false);
+    expect(r.mappings[1].tag).toBe(FIELD_TAGS.IGNORE);
+    expect(isDestructiveOp(SCHEMA_OPS.CHANGE_TAG)).toBe(false);
+  });
+});

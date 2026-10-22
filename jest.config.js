@@ -7,7 +7,7 @@ export default {
   projects: [
     {
       displayName: 'node',
-      testMatch: ['**/tests/!(job-extractor|extractors-ats|posted-date|role-company-split).test.js'],
+      testMatch: ['**/tests/!(job-extractor|extractors-ats|posted-date|role-company-split|dialog).test.js'],
     },
     {
       displayName: 'jsdom',
@@ -17,6 +17,7 @@ export default {
         '**/tests/extractors-ats.test.js',
         '**/tests/posted-date.test.js',
         '**/tests/role-company-split.test.js',
+        '**/tests/dialog.test.js',
       ],
       setupFiles: ['<rootDir>/tests/setup.js'],
     },
