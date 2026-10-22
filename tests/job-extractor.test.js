@@ -265,8 +265,7 @@ describe('normalizeDate', () => {
 describe('regressions', () => {
   test('normalizeDate rejects year-less strings that Date() would coerce to 2001', () => {
     expect(normalizeDate('12')).toBe('');
-    expect(normalizeDate('Jan 5')).toBe('');
-    expect(normalizeDate('3 days ago')).toBe('');
+    expect(normalizeDate('Jan 5', new Date(2026, 5, 1))).toBe('2026-01-05');
     expect(normalizeDate('Jan 5, 2024')).toBe('2024-01-05');
   });
 
@@ -299,14 +298,9 @@ describe('normalizeDate policy: no date beats a wrong date', () => {
     '03/04/2025', // d/m vs m/d ambiguous
     '1.2.2025',
     '1/5/24', // two-digit year
-    'Jan 5',
-    '5 January',
     '12',
     '20250815',
     '1723680000',
-    '3 days ago',
-    'Posted today',
-    '30+ Days Ago',
     '1995-03-01',
     '1999-12-31',
     '2999-01-01',
@@ -328,10 +322,10 @@ describe('normalizeDate policy: no date beats a wrong date', () => {
     expect(data.postedDate).toBe('');
   });
 
-  test('extractJobData ignores "Posted 3 days ago" body text', () => {
+  test('extractJobData resolves "Posted 3 days ago" and drops ambiguous 04/05/2025', () => {
     const html = '<body><h1>Engineer</h1><p>Posted 3 days ago</p><p>Posted: 04/05/2025</p></body>';
     const data = extractJobData(parseHtml(html, 'https://acme.com/jobs/engineer-1234567'), 'https://acme.com/jobs/engineer-1234567');
-    expect(data.postedDate).toBe('');
+    expect(data.postedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
 

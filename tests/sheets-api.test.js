@@ -255,10 +255,10 @@ describe('sheets-api', () => {
         .mockResolvedValueOnce(ok(mkRows(5, ROW_CHUNK_SIZE * 2)));
       const rows = await loadTabRows('id', "Jo'bs", 't');
       expect(rows).toHaveLength(ROW_CHUNK_SIZE * 2 + 5);
-      expect(rows[2002]).toEqual(['r2002']);
+      expect(rows[ROW_CHUNK_SIZE * 2 + 2]).toEqual([`r${ROW_CHUNK_SIZE * 2 + 2}`]);
       expect(global.fetch).toHaveBeenCalledTimes(3);
-      expect(rangeOf(global.fetch.mock.calls[1])).toBe("'Jo''bs'!A1001:ZZ2000");
-      expect(rangeOf(global.fetch.mock.calls[2])).toBe("'Jo''bs'!A2001:ZZ3000");
+      expect(rangeOf(global.fetch.mock.calls[1])).toBe(`'Jo''bs'!A${ROW_CHUNK_SIZE + 1}:ZZ${ROW_CHUNK_SIZE * 2}`);
+      expect(rangeOf(global.fetch.mock.calls[2])).toBe(`'Jo''bs'!A${ROW_CHUNK_SIZE * 2 + 1}:ZZ${ROW_CHUNK_SIZE * 3}`);
     });
 
     test('stops when a chunk is blank or empty', async () => {
