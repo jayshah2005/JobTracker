@@ -1,6 +1,15 @@
 /**
  * Sheets add/save/find/schema orchestration for the service worker.
  * Calls lib/* for HTTP and domain rules; uses withSheetAccess for tokens.
+ *
+ * Every exported function is the handler for one message type (see
+ * service-worker.js) and resolves to `{ success, ... }`; errors surface as
+ * `{ success: false, error }` (or a thrown friendly Error the router converts).
+ *
+ * State: `configuredSheets` in chrome.storage.local is the local copy of each
+ * connected spreadsheet's tabs/mappings. Handlers do network calls between
+ * read and write, so writers that only change one tab re-read the latest
+ * storage right before saving to avoid clobbering concurrent edits.
  */
 
 import {
@@ -98,6 +107,7 @@ async function materializeTabs(spreadsheetId, rawTabs, existingTabs, token) {
   return tabs;
 }
 
+/** Connect a spreadsheet by URL: reads all tabs, seeds empty ones, stores config. */
 export async function addSheet(url) {
   const parsed = parseGoogleSheetUrl(url);
   if (!parsed.valid) {
@@ -111,8 +121,7 @@ export async function addSheet(url) {
       const spreadsheetTitle =
         meta.properties?.title || `Sheet ${parsed.spreadsheetId.slice(0, 8)}…`;
 
-      const sheets = await getConfiguredSheets();
-      const existing = sheets.find(
+      const existing = (await getConfiguredSheets()).find(
         (s) => s.spreadsheetId === parsed.spreadsheetId
       );
       const tabs = await materializeTabs(
@@ -130,7 +139,8 @@ export async function addSheet(url) {
         addedAt: Date.now(),
       };
 
-      const next = [...sheets];
+      // Re-read: materializeTabs hits the network, so storage may have changed.
+      const next = [...(await getConfiguredSheets())];
       const existingIndex = next.findIndex(
         (s) => s.spreadsheetId === parsed.spreadsheetId
       );
@@ -148,6 +158,7 @@ export async function addSheet(url) {
   }
 }
 
+/** Disconnect a spreadsheet locally (the Google Sheet itself is untouched). */
 export async function removeSheet(spreadsheetId) {
   const sheets = (await getConfiguredSheets()).filter(
     (s) => s.spreadsheetId !== spreadsheetId
@@ -215,6 +226,7 @@ export async function renameTab({ spreadsheetId, tabId, title }) {
   }
 }
 
+/** Re-read every connected spreadsheet (titles, tabs, dropdown values) from Google. */
 export async function refreshAllSheets() {
   return withSheetAccess(async (token) => {
     const sheets = await getConfiguredSheets();
@@ -244,7 +256,11 @@ export async function refreshAllSheets() {
   });
 }
 
-
+/**
+ * Apply one column edit (rename/add/delete/move/tag/dropdown) to a tab, write
+ * headers to Google when the change is structural, and record an undo entry.
+ * Destructive ops require `confirmed: true` (otherwise `needsConfirmation`).
+ */
 export async function applySchemaChangeMessage(message) {
   const {
     spreadsheetId,
@@ -367,6 +383,7 @@ async function hydrateTabColumnUniques(
   });
 }
 
+/** Refresh a tab's cached unique column values (dropdown suggestions) from the sheet. */
 export async function syncTabColumnUniques(message) {
   const {
     spreadsheetId,
@@ -419,6 +436,7 @@ export async function syncTabColumnUniques(message) {
   }
 }
 
+/** Revert a schema change (latest, or a specific entry id) and move it to the redo stack. */
 export async function undoSchemaChange(entryId) {
   const stack = await getUndoStack();
   let entry = null;
@@ -474,6 +492,7 @@ export async function undoSchemaChange(entryId) {
   };
 }
 
+/** Re-apply a previously undone schema change. */
 export async function redoSchemaChange(entryId) {
   const stack = await getRedoStack();
   let entry = null;
@@ -529,6 +548,10 @@ export async function redoSchemaChange(entryId) {
   };
 }
 
+/**
+ * Load every tab of every connected sheet with raw rows, for duplicate checks.
+ * Unreadable sheets/tabs are skipped so one bad sheet doesn't block the check.
+ */
 async function loadAllTabsWithRows(token, sheets) {
   const tabs = [];
   for (const sheet of sheets) {
@@ -566,6 +589,7 @@ async function loadAllTabsWithRows(token, sheets) {
   return tabs;
 }
 
+/** Look for an existing row for this job across all connected sheets. */
 export async function findApplication(extractedData = {}) {
   const sheets = await getConfiguredSheets();
   if (!sheets.length) return { success: true, matched: false };
@@ -581,6 +605,10 @@ export async function findApplication(extractedData = {}) {
   }
 }
 
+/**
+ * Append (or update, when `existingRowIndex` is given) a job row in one tab.
+ * Refuses to add a duplicate to the same tab unless updating.
+ */
 export async function saveJob(message) {
   const {
     spreadsheetId,
@@ -682,9 +710,17 @@ export async function saveJob(message) {
       token
     );
 
-    tab.isNew = false;
-    tab.rowCount = (tab.rowCount || 0) + 1;
-    await saveConfiguredSheets(sheets);
+    // Re-read before writing: the append above was a network round trip, and
+    // saving the stale `sheets` snapshot could undo a concurrent rename/edit.
+    const latest = await getConfiguredSheets();
+    const latestTab = latest
+      .find((s) => s.spreadsheetId === spreadsheetId)
+      ?.tabs?.find((t) => t.tabId === tabId || t.gid === tabId);
+    if (latestTab) {
+      latestTab.isNew = false;
+      latestTab.rowCount = (latestTab.rowCount || 0) + 1;
+      await saveConfiguredSheets(latest);
+    }
 
     const rowIndex = rowIndexFromUpdatedRange(appendRes?.updates?.updatedRange);
 
@@ -731,9 +767,14 @@ export async function deleteJob(message) {
       const sheetIdForApi = tab.sheetId ?? tab.gid;
       await deleteJobRowInTab(spreadsheetId, sheetIdForApi, index, token);
 
-      if (Number.isFinite(Number(tab.rowCount)) && tab.rowCount > 0) {
-        tab.rowCount = Math.max(0, Number(tab.rowCount) - 1);
-        await saveConfiguredSheets(sheets);
+      // Re-read so we don't overwrite changes made while the delete was in flight.
+      const latest = await getConfiguredSheets();
+      const latestTab = latest
+        .find((s) => s.spreadsheetId === spreadsheetId)
+        ?.tabs?.find((t) => String(t.gid) === String(tab.gid));
+      if (latestTab && Number(latestTab.rowCount) > 0) {
+        latestTab.rowCount = Number(latestTab.rowCount) - 1;
+        await saveConfiguredSheets(latest);
       }
 
       return {

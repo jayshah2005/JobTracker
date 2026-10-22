@@ -224,3 +224,65 @@ describe('ATS pipelines', () => {
     ).toBe(true);
   });
 });
+
+describe('regressions', () => {
+  test('host matching does not accept look-alike domains', () => {
+    expect(detectAts('https://notlinkedin.com/jobs/view/123').ats).toBe('general');
+    expect(detectAts('https://www.linkedin.com/jobs/view/123').ats).toBe('linkedin');
+  });
+
+  test('Lever keeps company names that merely contain "lever"', () => {
+    const doc = parseHtml(
+      `<div class="main-header-logo"><img alt="Clever Labs logo"></div>
+       <div class="posting-headline"><h2>Engineer</h2></div>`,
+      'https://jobs.lever.co/clever/abc-123'
+    );
+    expect(extractJobData(doc, 'https://jobs.lever.co/clever/abc-123').company).toBe('Clever Labs');
+  });
+});
+
+describe('detectAts edge cases', () => {
+  test('Workday jobId is the Title_Req slug, not the location', () => {
+    const meta = detectAts(
+      'https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/New-York-NY/Software-Engineer_R-12345/apply?source=x'
+    );
+    expect(meta.jobId).toBe('Software-Engineer_R-12345');
+    expect(meta.site).toBe('Careers');
+  });
+
+  test('LinkedIn id from slugged view URL and currentJobId', () => {
+    expect(
+      detectAts('https://www.linkedin.com/jobs/view/senior-engineer-at-acme-3812345678?trackingId=x').jobId
+    ).toBe('3812345678');
+    expect(
+      detectAts('https://www.linkedin.com/jobs/collections/recommended/?currentJobId=3812345678').jobId
+    ).toBe('3812345678');
+  });
+
+  test('a Greenhouse page that links to LinkedIn is still Greenhouse', () => {
+    const url = 'https://boards.greenhouse.io/acme/jobs/4012345005';
+    const doc = parseHtml('<body><a href="https://linkedin.com/jobs/view/1">share</a></body>', url);
+    expect(detectAts(url, doc).ats).toBe('greenhouse');
+  });
+
+  test('a company page that merely links to Indeed/LinkedIn stays general', () => {
+    const url = 'https://acme.com/careers/engineer';
+    const doc = parseHtml(
+      '<body><a href="https://www.indeed.com/cmp/acme">Indeed</a><a href="https://linkedin.com/jobs/acme">LI</a></body>',
+      url
+    );
+    expect(detectAts(url, doc).ats).toBe('general');
+  });
+
+  test('indeed lookalike hosts are not Indeed', () => {
+    expect(detectAts('https://notindeed.com/jobs/1').ats).toBe('general');
+  });
+
+  test('Greenhouse first_published is used, updated_at is not a posted date', () => {
+    const url = 'https://boards.greenhouse.io/acme/jobs/4012345005';
+    const html = `<body><h1>Engineer</h1><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+      props: { pageProps: { job: { id: 4012345005, title: 'Engineer', updated_at: '2025-06-01T00:00:00Z' } } },
+    })}</script></body>`;
+    expect(extractJobData(parseHtml(html, url), url).postedDate).toBe('');
+  });
+});

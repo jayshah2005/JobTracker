@@ -3,6 +3,15 @@
  * Classic (non-module) entry so a failed static import cannot kill the whole
  * script. Heavy libs load via dynamic import(chrome.runtime.getURL(...)).
  *
+ * Role in the extension:
+ *  - Top frame: decides whether the page is a job posting (URL rules first,
+ *    then the DOM extractor), shows/hides the floating launcher, re-checks on
+ *    late-rendered content and SPA navigation, and asks the background worker
+ *    to pre-extract job data for the tab.
+ *  - Every frame: answers GET_PAGE_JOB_DATA from the sidepanel/background with
+ *    extractJobData() (the best frame result is picked by pickBestExtraction).
+ *  - Listens for SIDE_PANEL_STATE to hide the launcher while the panel is open.
+ *
  * Launcher CSS is declared in manifest content_scripts.css (CSP-safe).
  */
 
@@ -26,6 +35,7 @@ let jobPageUrlMod = null;
 let urlHelperPromise = null;
 let libsPromise = null;
 
+/** Absolute chrome-extension:// URL of a packaged file (needed for dynamic import). */
 function extUrl(path) {
   return chrome.runtime.getURL(path);
 }
@@ -47,6 +57,7 @@ function loadUrlHelper() {
   return urlHelperPromise;
 }
 
+/** Load the extractor + storage modules once (shared promise; retried after failure). */
 function loadLibs() {
   if (!libsPromise) {
     libsPromise = Promise.all([
@@ -69,6 +80,7 @@ function loadLibs() {
   return libsPromise;
 }
 
+/** Cheap URL rules first (work before libs load), then the full DOM heuristic. */
 function pageLooksLikeJob() {
   if (jobPageUrlMod?.urlLooksLikeJobPosting?.(location.href)) return true;
   if (extractorMod?.isLikelyJobPage) {
@@ -108,9 +120,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     sendResponse({ success: true });
   }
-  return true;
+  // Synchronous / unknown messages: don't keep the channel open (returning
+  // true without ever responding leaves other listeners' senders hanging).
+  return false;
 });
 
+/** Minimal inline styles so the launcher still renders if the CSS file is blocked. */
 function injectFallbackStyles() {
   if (document.getElementById('job-tracker-styles')) return;
   const style = document.createElement('style');
@@ -156,6 +171,7 @@ function injectFallbackStyles() {
   (document.head || document.documentElement).appendChild(style);
 }
 
+/** Build the launcher DOM once (top frame only); starts hidden until syncLauncherVisibility. */
 function createLauncher() {
   if (window !== window.top) return;
   if (document.getElementById(LAUNCHER_ID)) return;
@@ -196,6 +212,7 @@ function createLauncher() {
   });
 }
 
+/** Apply all visibility conditions to the launcher element. */
 function syncLauncherVisibility() {
   const el = document.getElementById(LAUNCHER_ID);
   if (!el) return;
@@ -221,6 +238,7 @@ function hideLauncher() {
   if (el) el.classList.add('jt-hidden');
 }
 
+/** Has the page rendered enough content that an early job-page check is meaningful? */
 function pageLooksReady() {
   return Boolean(
     document.querySelector(
@@ -229,8 +247,15 @@ function pageLooksReady() {
   );
 }
 
+/** Show the launcher on job pages, hide it otherwise (and when the setting is off). */
 function maybeShowLauncher() {
-  if (!autoShowEnabled || window !== window.top || dismissed) return;
+  if (window !== window.top) return;
+  if (!autoShowEnabled) {
+    // The setting loads asynchronously: the launcher may already be visible.
+    hideLauncher();
+    return;
+  }
+  if (dismissed) return;
   if (pageLooksLikeJob()) {
     showLauncher();
   } else {
@@ -238,6 +263,7 @@ function maybeShowLauncher() {
   }
 }
 
+/** Debounced: tell the background worker to pre-extract this tab's job data (or clear it). */
 function requestPreloadJobData() {
   if (window !== window.top) return;
   if (preloadTimer) clearTimeout(preloadTimer);
@@ -258,6 +284,10 @@ function requestPreloadJobData() {
   }, 400);
 }
 
+/**
+ * SPA/late-render support: if the page is not yet a job page, watch DOM
+ * mutations (debounced, for at most 12s) and re-check until it becomes one.
+ */
 function watchForLateContent() {
   if (window !== window.top) return;
 
@@ -303,6 +333,7 @@ function watchForLateContent() {
   }, 12000);
 }
 
+/** Detect client-side navigation (history API gives no event) by polling location.href. */
 function watchForSpaUrlChanges() {
   if (window !== window.top) return;
   lastSeenUrl = window.location.href;
@@ -323,6 +354,7 @@ function watchForSpaUrlChanges() {
   urlWatchTimer = setInterval(onPossibleUrlChange, 1000);
 }
 
+/** Top-frame startup: URL-rule check, load libs + settings, re-check, start watchers. */
 async function initTopFrame() {
   if (window !== window.top) return;
 

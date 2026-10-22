@@ -254,6 +254,22 @@ input:focus {
   color: var(--jt-danger);
 }
 
+.hidden {
+  display: none !important;
+}
+
+.status-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--jt-primary);
+  outline-offset: 2px;
+}
+
 .advanced {
   margin: 20px 0 8px;
   background: var(--jt-card);

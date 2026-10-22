@@ -42,7 +42,7 @@ If placement is ambiguous, ask the user before inventing a new top-level folder.
 | Sidebar UI | `sidepanel/*` | Side panel HTML/CSS/JS, drafts, save form | Direct Sheets HTTP; `setOptions`; `executeScript` extract |
 | Page UI | `content/*` | Job-page detection (`classifyJobUrl` / `isLikelyJobPage`), floating launcher, `GET_PAGE_JOB_DATA` reply | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
 | Settings | `options/*` | Settings UI; use `lib/storage` for prefs | Background chrome wiring; raw Sheets HTTP |
-| Connect | `connect/*` | First-time OAuth client setup UI | Side panel; job extraction |
+| Connect | `connect/*` | “Set up Google” page: OAuth client setup (Advanced) + sign-in troubleshooting UI | Side panel; job extraction |
 | Tests | `tests/*` | Jest coverage for `lib/` | Duplicating production logic |
 
 **Removed:** `popup/` — do not recreate. Toolbar opens the side panel.
@@ -65,7 +65,7 @@ Split duties with **modules imported by that entry**, not a second worker.
 
 **Auth / settings:** `GET_AUTH_STATUS`, `SAVE_OAUTH_CLIENT`, `SIGN_IN`, `SIGN_OUT`, `GET_SETTINGS`, `SAVE_SETTINGS`
 
-**Sheets:** `ADD_SHEET`, `REMOVE_SHEET`, `REFRESH_SHEETS`, `GET_SHEETS`, `SAVE_JOB`, `DELETE_JOB`, `FIND_APPLICATION`, `APPLY_SCHEMA_CHANGE`, `SYNC_TAB_COLUMN_UNIQUES`, `UNDO_SCHEMA_CHANGE`, `GET_UNDO_STACK`, `RENAME_SHEET_TAB`
+**Sheets:** `ADD_SHEET`, `REMOVE_SHEET`, `REFRESH_SHEETS`, `GET_SHEETS`, `SAVE_JOB`, `DELETE_JOB`, `FIND_APPLICATION`, `APPLY_SCHEMA_CHANGE`, `SYNC_TAB_COLUMN_UNIQUES`, `UNDO_SCHEMA_CHANGE`, `REDO_SCHEMA_CHANGE`, `GET_UNDO_STACK`, `RENAME_SHEET_TAB`
 
 **Page / panel:** `GET_TAB_JOB_DATA`, `PRELOAD_TAB_JOB_DATA`, `CLEAR_TAB_JOB_PRELOAD`, `GET_PAGE_JOB_DATA` (content reply), `OPEN_SIDE_PANEL`, `CLOSE_SIDE_PANEL`, `SIDE_PANEL_UNLOADED`, `SIDE_PANEL_STATE` (to content)
 

@@ -1,3 +1,19 @@
+/**
+ * Side panel controller for Job Tracker.
+ *
+ * Shows one view at a time (see showView): loading, error, signin (Google not
+ * connected), setup (no sheet added yet), save (form for the current job page,
+ * also used to edit an already-saved row) and applied (post-save confirmation).
+ * All Google/Sheets work happens in the service worker; this file only sends
+ * chrome.runtime messages (GET_AUTH_STATUS, GET_SHEETS, REFRESH_SHEETS,
+ * ADD_SHEET, FIND_APPLICATION, SAVE_JOB, DELETE_JOB, APPLY_SCHEMA_CHANGE,
+ * GET_TAB_JOB_DATA, SIGN_IN, CLOSE_SIDE_PANEL, SIDE_PANEL_UNLOADED).
+ *
+ * Sections: state / init / data loading / views / sign-in & setup /
+ * destination picker / edit mode / job card & fields / dropdown comboboxes /
+ * save & delete / helpers.
+ */
+
 import { FIELD_TAGS } from '../lib/constants.js';
 import {
   getFieldsNeedingInput,
@@ -13,15 +29,17 @@ import {
   findDestination,
 } from '../lib/sheet-config.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
-import { getSettings } from '../lib/storage.js';
 
 const $ = (sel) => document.querySelector(sel);
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
 let sheets = [];
 let destinations = [];
 let selectedDestination = null;
 let extractedData = {};
-let settings = {};
 let userInputs = {};
 let existingMatch = null;
 /** When set, Save updates this sheet row instead of appending. */
@@ -31,6 +49,7 @@ let boundTabId = null;
 let boundTabUrl = '';
 let refreshTimer = null;
 
+/** Session-storage key for the unsaved form draft of a given tab. */
 function draftKey(tabId) {
   return `sidepanelDraft:${tabId}`;
 }
@@ -39,6 +58,7 @@ function isEditingExisting() {
   return editingRowIndex != null && Number.isFinite(Number(editingRowIndex));
 }
 
+/** Ask the service worker to close this panel, then close the window. */
 async function collapseSidePanel() {
   try {
     await chrome.runtime.sendMessage({
@@ -54,6 +74,10 @@ async function collapseSidePanel() {
     /* ignore */
   }
 }
+
+// ---------------------------------------------------------------------------
+// Init & tab binding
+// ---------------------------------------------------------------------------
 
 async function init() {
   boundTabId = await resolveBoundTabId();
@@ -71,6 +95,7 @@ async function init() {
   $('#open-options').addEventListener('click', openSettings);
   $('#collapse-panel')?.addEventListener('click', collapseSidePanel);
 
+  $('#retry-btn').addEventListener('click', () => loadData({ restoreDraft: true }));
   $('#sign-in-btn').addEventListener('click', handleSignIn);
   $('#open-connect-btn').addEventListener('click', openConnectPage);
   $('#open-connect-help').addEventListener('click', (e) => {
@@ -104,6 +129,7 @@ async function init() {
   await loadData({ restoreDraft: true });
 }
 
+/** Find the tab this panel belongs to (the active tab of the focused window). */
 async function resolveBoundTabId() {
   // Prefer the tab this side panel is attached to (current window's active tab).
   const [tab] =
@@ -117,6 +143,7 @@ async function resolveBoundTabId() {
   return fallback?.id ?? null;
 }
 
+/** Reload job data (debounced) when the bound tab navigates or finishes loading. */
 async function onBoundTabUpdated(tabId, changeInfo, tab) {
   if (tabId !== boundTabId) return;
   if (changeInfo.status !== 'complete' && !changeInfo.url) return;
@@ -129,6 +156,10 @@ async function onBoundTabUpdated(tabId, changeInfo, tab) {
     loadData({ restoreDraft: true, quiet: true });
   }, 350);
 }
+
+// ---------------------------------------------------------------------------
+// Drafts (per-tab, survive panel reloads and tab navigation within the session)
+// ---------------------------------------------------------------------------
 
 async function saveDraft() {
   if (!boundTabId || !chrome.storage?.session) return;
@@ -150,13 +181,37 @@ async function loadDraft() {
   return data[draftKey(boundTabId)] || null;
 }
 
-async function loadData({ restoreDraft = false, quiet = false } = {}) {
+// ---------------------------------------------------------------------------
+// Data loading: decides which view to show
+// ---------------------------------------------------------------------------
+
+/**
+ * Load auth, sheets and the current page, then pick a view. Any unexpected
+ * failure lands on the error view with a retry button (unless quiet, where
+ * the current view stays and only a status message appears).
+ * @param {{restoreDraft?: boolean, quiet?: boolean}} opts quiet = background
+ *   refresh after tab navigation (no loading spinner, uses cached sheets).
+ */
+async function loadData(opts = {}) {
+  try {
+    await loadDataInner(opts);
+  } catch (err) {
+    if (opts.quiet) {
+      showStatus(err.message || 'Could not refresh job details.', 'error');
+    } else {
+      $('#error-view-text').textContent =
+        err.message || 'Could not load job details. Try again.';
+      showView('error');
+    }
+  }
+}
+
+async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
   if (!quiet) showView('loading');
   existingMatch = null;
 
-  const [authRes, settingsFromStore, tab] = await Promise.all([
+  const [authRes, tab] = await Promise.all([
     sendMessage({ type: 'GET_AUTH_STATUS' }),
-    getSettings(),
     boundTabId
       ? chrome.tabs.get(boundTabId).catch(() => null)
       : getActiveTab(),
@@ -172,13 +227,10 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   if (!signedIn) {
     showView('signin');
     $('#sign-in-btn').classList.toggle('hidden', needsSetup);
-    $('#open-connect-btn').classList.remove('hidden');
-    $('#open-connect-btn').classList.toggle('btn-primary', needsSetup);
-    $('#open-connect-btn').classList.toggle('btn-secondary', !needsSetup);
     const connectBtn = $('#open-connect-btn');
-    if (connectBtn) {
-      connectBtn.textContent = needsSetup ? 'Set up Google' : 'Google help';
-    }
+    connectBtn.classList.toggle('btn-primary', needsSetup);
+    connectBtn.classList.toggle('btn-secondary', !needsSetup);
+    connectBtn.textContent = needsSetup ? 'Set up Google' : 'Sign-in help';
     $('#signin-copy').textContent = needsSetup
       ? 'First-time setup opens in a full page. Follow the steps there, then come back to sign in.'
       : 'Sign in with Google once. That account is used for every spreadsheet you add.';
@@ -195,7 +247,6 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   }
 
   sheets = sheetsRes?.sheets || [];
-  settings = settingsFromStore;
   destinations = getAllDestinations(sheets);
 
   if (sheets.length === 0) {
@@ -218,10 +269,7 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
     type: 'FIND_APPLICATION',
     extractedData,
   });
-  if (found?.matched) {
-    enterEditMode(found);
-    return;
-  }
+  if (found?.matched && enterEditMode(found)) return;
 
   editingRowIndex = null;
   existingMatch = null;
@@ -234,7 +282,9 @@ async function loadData({ restoreDraft = false, quiet = false } = {}) {
   await saveDraft();
 }
 
+/** Show exactly one top-level view: loading | error | signin | setup | save | applied. */
 function showView(name) {
+  $('#error-view').classList.toggle('hidden', name !== 'error');
   $('#loading-view').classList.toggle('hidden', name !== 'loading');
   $('#signin-view').classList.toggle('hidden', name !== 'signin');
   $('#setup-view').classList.toggle('hidden', name !== 'setup');
@@ -242,8 +292,13 @@ function showView(name) {
   $('#applied-view').classList.toggle('hidden', name !== 'applied');
 }
 
+// ---------------------------------------------------------------------------
+// Sign-in & first sheet
+// ---------------------------------------------------------------------------
+
 async function handleSignIn() {
   const btn = $('#sign-in-btn');
+  clearStatus();
   btn.disabled = true;
   btn.textContent = 'Signing in…';
   try {
@@ -257,12 +312,9 @@ async function handleSignIn() {
     } else {
       showStatus(
         res.error ||
-          'Sign-in failed. Open Set up Google and check Common problems and fixes.',
+          'Sign-in failed. Open Sign-in help and check Common problems and fixes.',
         'error'
       );
-      $('#open-connect-btn').classList.remove('hidden');
-      $('#open-connect-btn').classList.remove('btn-primary');
-      $('#open-connect-btn').classList.add('btn-secondary');
     }
   } catch (err) {
     showStatus(err.message, 'error');
@@ -279,7 +331,8 @@ function openConnectPage() {
 async function handleAddSheet() {
   const url = $('#setup-sheet-url').value.trim();
   if (!url) {
-    showStatus('Paste a Google Sheets link.', 'error');
+    showStatus('Paste a Google Sheets link first.', 'error');
+    $('#setup-sheet-url').focus();
     return;
   }
 
@@ -290,18 +343,22 @@ async function handleAddSheet() {
   try {
     const res = await sendMessage({ type: 'ADD_SHEET', url });
     if (res.success) {
-      showStatus('Sheet connected.', 'success');
       await loadData();
+      showStatus('Sheet added. You can now save jobs to it.', 'success');
     } else {
-      showStatus(res.error || 'Could not add sheet.', 'error');
+      showStatus(res.error || 'Could not add that sheet. Check the link and that your Google account can edit it.', 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Add Sheet';
+    btn.textContent = 'Add sheet';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Destination picker (which spreadsheet tab a job is saved to)
+// ---------------------------------------------------------------------------
 
 function destinationLabel(d) {
   if (!d) return '';
@@ -326,11 +383,7 @@ function setupDestinationPicker(preferredKey = null) {
   selectedDestination = destinations[idx] || destinations[0] || null;
 
   // Still honor preferred destination when the picker is hidden (single tab).
-  if (!shouldShowDestinationPicker(sheets)) {
-    section.classList.add('hidden');
-  } else {
-    section.classList.remove('hidden');
-  }
+  section.classList.toggle('hidden', !shouldShowDestinationPicker(sheets));
 
   if (input) {
     const label = destinationLabel(selectedDestination);
@@ -344,6 +397,7 @@ function setupDestinationPicker(preferredKey = null) {
   }
 }
 
+/** True when a FIND_APPLICATION match lives in the given destination tab. */
 function destinationMatches(match, dest) {
   if (!match?.matched || !dest) return false;
   if (String(match.spreadsheetId) !== String(dest.sheetId)) return false;
@@ -509,6 +563,10 @@ function bindDestinationCombo() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Edit mode (job already saved in a sheet) and post-save confirmation
+// ---------------------------------------------------------------------------
+
 function renderApplied() {
   const m = existingMatch;
   const when = m.dateApplied ? ` on ${m.dateApplied}` : '';
@@ -521,10 +579,14 @@ function renderApplied() {
   }.`;
 }
 
+/**
+ * Switch the save form into "update this row" mode.
+ * @returns {boolean} false (with a status message) if the match has no usable row.
+ */
 function enterEditMode(match) {
   if (match?.rowIndex == null || !Number.isFinite(Number(match.rowIndex))) {
-    showStatus('Could not find that saved row to edit. Try reopening the sidebar.', 'error');
-    return;
+    showStatus('This job is already in your tracker, but its row could not be located for editing. Reopen the side panel to retry.', 'error');
+    return false;
   }
 
   existingMatch = match;
@@ -559,6 +621,7 @@ function enterEditMode(match) {
   renderDynamicFields({ preferExistingInputs: true });
   showView('save');
   saveDraft();
+  return true;
 }
 
 /** Resolve a full match (with rowIndex/row) before entering edit mode. */
@@ -570,7 +633,7 @@ async function startEditingExisting() {
       extractedData,
     });
     if (!found?.matched) {
-      showStatus('Could not find that application in your sheet.', 'error');
+      showStatus('Could not find that application in your sheet. It may have been moved or deleted.', 'error');
       return;
     }
     match = found;
@@ -635,6 +698,10 @@ function renderEditChrome() {
   deleteEditingBtn?.classList.toggle('hidden', !editing);
 }
 
+// ---------------------------------------------------------------------------
+// Job card & dynamic form fields
+// ---------------------------------------------------------------------------
+
 function companyInitials(name) {
   const parts = String(name || '')
     .trim()
@@ -654,6 +721,7 @@ function avatarColor(seed) {
   return palette[hash % palette.length];
 }
 
+/** Fill the header card (company, role, chips, link) from extractedData. */
 function renderJobCard() {
   const company = extractedData.company || 'Unknown company';
   const role = extractedData.role || 'Job details';
@@ -690,6 +758,12 @@ function renderJobCard() {
   }
 }
 
+/**
+ * Build the form from the destination's column mappings. Only fields that
+ * need user input are shown (see getFieldsNeedingInput).
+ * @param {{preferExistingInputs?: boolean}} opts true when editing a saved row:
+ *   sheet values win and page extraction/today's date are not injected.
+ */
 function renderDynamicFields({ preferExistingInputs = false } = {}) {
   if (!selectedDestination) return;
 
@@ -725,6 +799,7 @@ function renderDynamicFields({ preferExistingInputs = false } = {}) {
   bindComboboxes(container);
 }
 
+/** HTML for one field row (dropdown combobox, textarea, date or text input). */
 function renderField(field, preferExistingInputs = false) {
   const id = `field-${field.columnIndex}-${field.tag}`;
   const lowClass = field.lowConfidence ? ' low-confidence' : '';
@@ -822,6 +897,10 @@ function renderField(field, preferExistingInputs = false) {
     </div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Dropdown-column comboboxes
+// ---------------------------------------------------------------------------
+
 /**
  * Searchable text combobox: click resets to search all options;
  * typing filters; Enter/add creates a new choice; × removes one.
@@ -897,8 +976,15 @@ function bindComboboxes(container) {
           );
           if (current) selectedDestination = current;
         }
+        if (!res?.success) {
+          showStatus(
+            res?.error || 'Could not update the dropdown options in your sheet. Your choice is still used for this save.',
+            'error'
+          );
+        }
       } catch {
-        /* keep local options even if persist fails */
+        // Keep local options so the current save still works.
+        showStatus('Could not update the dropdown options in your sheet. Your choice is still used for this save.', 'error');
       }
     };
 
@@ -1091,6 +1177,7 @@ function bindComboboxes(container) {
   });
 }
 
+/** Read the URI-encoded JSON options stored on a combobox root element. */
 function parseComboOptions(root) {
   try {
     const raw = root.dataset.options || '';
@@ -1116,6 +1203,11 @@ function updateDestinationDropdownOptions(columnIndex, options) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Form value bookkeeping
+// ---------------------------------------------------------------------------
+
+/** Value the extension can fill in automatically for a field tag. */
 function getAutoValue(tag, data) {
   switch (tag) {
     case FIELD_TAGS.DATE_APPLIED:
@@ -1140,6 +1232,11 @@ function getAutoValue(tag, data) {
   }
 }
 
+/**
+ * Record a field value in userInputs under the keys the background expects:
+ * col_<n> always, plus dropdown_<n> / text_<n> / <tag> depending on type.
+ * Date fields are normalised to yyyy-mm-dd; blank applied dates become today.
+ */
 function setUserInputForField(tag, columnIndex, type, value) {
   const col = String(columnIndex);
   let next = value == null ? '' : String(value);
@@ -1176,11 +1273,16 @@ function onFieldChange(e) {
   saveDraft();
 }
 
+// ---------------------------------------------------------------------------
+// Save / update / delete
+// ---------------------------------------------------------------------------
+
 async function handleSave() {
   if (!selectedDestination) {
-    showStatus('No destination selected.', 'error');
+    showStatus('Choose a destination sheet before saving.', 'error');
     return;
   }
+  clearStatus();
 
   const btn = $('#save-btn');
   // Only treat as update when the selected destination is the matched row's sheet.
@@ -1190,6 +1292,7 @@ async function handleSave() {
     (!existingMatch?.matched ||
       destinationMatches(existingMatch, selectedDestination));
   btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
   btn.innerHTML = `<span class="spinner"></span>${editing ? 'Updating…' : 'Saving…'}`;
 
   collectFieldValues();
@@ -1216,7 +1319,7 @@ async function handleSave() {
       showStatus(
         res.error ||
           'Already in this sheet. Update it here, or pick another destination to add a copy.',
-        'error'
+        'info'
       );
       return;
     }
@@ -1280,16 +1383,18 @@ async function handleSave() {
         showStatus('Saved to your tracker.', 'success');
       }
     } else {
-      showStatus(res.error || 'Failed to save.', 'error');
+      showStatus(res.error || 'Could not save to your sheet. Please try again.', 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
   } finally {
     btn.disabled = false;
+    btn.removeAttribute('aria-busy');
     restoreSaveButton();
   }
 }
 
+/** Reset the Save button markup after the spinner state. */
 function restoreSaveButton() {
   const btn = $('#save-btn');
   if (!btn) return;
@@ -1304,6 +1409,7 @@ function restoreSaveButton() {
   `;
 }
 
+/** Delete the saved row (from the applied banner or the edit form) after confirmation. */
 async function handleDeleteExisting() {
   const editing = isEditingExisting();
   const spreadsheetId =
@@ -1317,11 +1423,11 @@ async function handleDeleteExisting() {
     : Number(existingMatch?.rowIndex);
 
   if (!spreadsheetId || tabId == null || !Number.isFinite(rowIndex) || rowIndex < 0) {
-    showStatus('Could not find that saved row to delete.', 'error');
+    showStatus('Could not find that saved row to delete. Reopen the side panel and try again.', 'error');
     return;
   }
   if (rowIndex === 0) {
-    showStatus('Cannot delete the header row.', 'error');
+    showStatus('That is the sheet header row and cannot be deleted.', 'error');
     return;
   }
 
@@ -1365,8 +1471,8 @@ async function handleDeleteExisting() {
       await chrome.storage.session.remove(draftKey(boundTabId));
     }
 
-    showStatus('Removed from your tracker.', 'success');
     await loadData({ restoreDraft: false });
+    showStatus('Removed from your tracker.', 'success');
   } catch (err) {
     showStatus(err.message || 'Could not delete that application.', 'error');
   } finally {
@@ -1381,6 +1487,7 @@ async function handleDeleteExisting() {
   }
 }
 
+/** Sync every rendered field into userInputs (called before save/draft). */
 function collectFieldValues() {
   document.querySelectorAll('[data-field]').forEach((el) => {
     const tag = el.dataset.tag;
@@ -1400,16 +1507,45 @@ function collectFieldValues() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Show a message in the aria-live status bar ('success' | 'error' | 'info'). */
 function showStatus(msg, type) {
   const el = $('#status');
   el.textContent = msg;
   el.className = `status status-${type}`;
+  // Errors interrupt screen readers; success/info are announced politely.
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
   el.classList.remove('hidden');
 }
 
+function clearStatus() {
+  const el = $('#status');
+  el.textContent = '';
+  el.classList.add('hidden');
+}
+
+/**
+ * Promise wrapper for chrome.runtime.sendMessage. Never rejects: a missing
+ * response (service worker error, extension reloaded) resolves to
+ * { success: false, error } so callers can always read res.success / res.error.
+ */
 function sendMessage(msg) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(msg, resolve);
+    chrome.runtime.sendMessage(msg, (res) => {
+      if (chrome.runtime.lastError || res == null) {
+        resolve({
+          success: false,
+          error:
+            chrome.runtime.lastError?.message ||
+            'No response from the extension. Reload the side panel and try again.',
+        });
+        return;
+      }
+      resolve(res);
+    });
   });
 }
 

@@ -63,6 +63,7 @@ function readManifest() {
 
 function writeStoreManifest(manifest) {
   const storeManifest = { ...manifest };
+  // The key pins the extension ID for local development; the store assigns its own.
   delete storeManifest.key;
   writeFileSync(
     join(STAGING, 'manifest.json'),
@@ -98,13 +99,15 @@ function injectPublishedOAuth() {
 
   const configPath = join(STAGING, 'lib', 'oauth-config.js');
   let source = readFileSync(configPath, 'utf8');
+  // Replacer functions (not strings) so "$" in a secret is never treated as a
+  // special replacement pattern.
   source = source.replace(
     /export const DEFAULT_OAUTH_CLIENT_ID = '';/,
-    `export const DEFAULT_OAUTH_CLIENT_ID = ${JSON.stringify(clientId)};`
+    () => `export const DEFAULT_OAUTH_CLIENT_ID = ${JSON.stringify(clientId)};`
   );
   source = source.replace(
     /export const DEFAULT_OAUTH_CLIENT_SECRET = '';/,
-    `export const DEFAULT_OAUTH_CLIENT_SECRET = ${JSON.stringify(clientSecret)};`
+    () => `export const DEFAULT_OAUTH_CLIENT_SECRET = ${JSON.stringify(clientSecret)};`
   );
   if (
     !source.includes(JSON.stringify(clientId)) ||
@@ -162,10 +165,15 @@ function zipPackage(version) {
   const zipPath = join(DIST, zipName);
   if (existsSync(zipPath)) rmSync(zipPath);
 
-  execFileSync('zip', ['-r', '-q', zipPath, '.'], {
-    cwd: STAGING,
-    stdio: 'inherit',
-  });
+  try {
+    // -x: keep macOS Finder metadata out of the store package.
+    execFileSync('zip', ['-r', '-q', zipPath, '.', '-x', '*.DS_Store'], {
+      cwd: STAGING,
+      stdio: 'inherit',
+    });
+  } catch (err) {
+    fail(`could not create the ZIP (is the "zip" command installed?): ${err.message}`);
+  }
 
   return { zipName, zipPath };
 }
@@ -174,6 +182,15 @@ function main() {
   const manifest = readManifest();
   const version = manifest.version;
   if (!version) fail('manifest.json has no version');
+
+  // The store reads manifest.json's version; package.json must not drift.
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  if (pkg.version !== version) {
+    fail(
+      `version mismatch: manifest.json is ${version} but package.json is ${pkg.version}. ` +
+        'Update both before packing.'
+    );
+  }
 
   rmSync(STAGING, { recursive: true, force: true });
   mkdirSync(STAGING, { recursive: true });

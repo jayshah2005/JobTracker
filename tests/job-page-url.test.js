@@ -1,7 +1,6 @@
 import {
   classifyJobUrl,
   urlLooksLikeJobPosting,
-  isKnownAtsJobUrl,
 } from '../lib/job-page-url.js';
 
 describe('urlLooksLikeJobPosting', () => {
@@ -87,8 +86,4 @@ describe('urlLooksLikeJobPosting', () => {
     expect(classifyJobUrl('https://example.com/about').kind).toBe('none');
   });
 
-  test('isKnownAtsJobUrl aliases urlLooksLikeJobPosting', () => {
-    const url = 'https://example.com/jobs/1';
-    expect(isKnownAtsJobUrl(url)).toBe(urlLooksLikeJobPosting(url));
-  });
 });

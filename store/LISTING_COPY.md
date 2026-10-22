@@ -40,7 +40,7 @@ How it works
 • Save — or update an existing row if you already tracked this job
 
 Setup (once)
-• Connect your Google account through the in-extension guide
+• Sign in with Google (the in-extension “Set up Google” guide helps if anything goes wrong)
 • Paste a Google Sheets link you can edit
 • Optionally map columns to match your spreadsheet
 
@@ -51,7 +51,7 @@ Privacy
 
 Requirements
 • A Google account and a spreadsheet you can edit
-• Permission to use Google Sheets API with your own OAuth client (setup steps are included)
+• Google sign-in that grants Job Tracker access to Google Sheets (only the spreadsheets scope is requested)
 ```
 
 ### Category
@@ -111,7 +111,7 @@ Chrome may show one field covering host permissions. Use this:
 ```
 Host access is required for two purposes only:
 
-1) Google APIs — https://www.googleapis.com/*, https://accounts.google.com/*, https://oauth2.googleapis.com/*, and https://docs.google.com/* so the extension can complete OAuth and read/write the user’s Google Spreadsheets after they sign in.
+1) Google APIs — https://www.googleapis.com/*, https://accounts.google.com/*, https://oauth2.googleapis.com/*, and https://docs.google.com/* (plus the Sheets API endpoint sheets.googleapis.com, which is covered by the broad access below) so the extension can complete OAuth and read/write the user’s Google Spreadsheets after they sign in.
 
 2) Job posting pages — broad site access (<all_urls> / matching content scripts) so Job Tracker can show its optional launcher on pages that look like job postings and extract visible job details from the page the user has open. The extension does not collect browsing history, does not inject ads, and does not send page contents to any Job Tracker server. Extracted fields are shown to the user and, if they choose Save, written to their own Google Sheet.
 ```
@@ -182,7 +182,7 @@ below from this file on page load — edit the fenced block and push.
 
 ```
 Privacy Policy — Job Tracker Chrome Extension
-Last updated: Oct 17, 2026
+Last updated: Oct 21, 2026
 
 Job Tracker (“the Extension”) helps you save job application information from web pages into Google Spreadsheets that you control.
 
@@ -194,6 +194,8 @@ Jay, publisher of Job Tracker. Contact: jayshah3616@gmail.com
 • Spreadsheet identifiers, tab names, and header/column mappings for sheets you explicitly link
 • Spreadsheet cell values the Extension reads or writes when you save or update a job application (for example company, role, URL, location, status, notes)
 • Optional UI preferences stored only on your device (for example whether to show the on-page button)
+• Job details read from the posting page you have open (for example title, company, location, URL). They are kept in temporary browser session storage so the side panel opens quickly and keeps your unsaved edits, and are written to a spreadsheet only when you click Save
+• If you use your own Google Cloud OAuth client, the Client ID and secret you paste, stored on your device
 
 We do not request access to Gmail, Google Drive file libraries beyond Sheets API calls for spreadsheets you link, Contacts, Calendar, or other Google products.
 
@@ -216,7 +218,7 @@ We do not sell Google user data, use it for advertising or credit decisions, or 
 • We do not maintain a separate cloud database of your sheet contents
 
 6. Retention and deletion of Google user data
-• OAuth tokens: kept in local Chrome storage until you sign out of Job Tracker, clear the Extension’s data in Chrome, or uninstall the Extension. Signing out removes stored tokens from the Extension.
+• OAuth tokens: kept in local Chrome storage until you sign out of Job Tracker, clear the Extension’s data in Chrome, or uninstall the Extension. Signing out removes stored tokens from the Extension; it does not by itself revoke Job Tracker’s access at Google (you can revoke access in your Google Account permissions, as described below).
 • Sheet configuration (IDs, tabs, column mappings) and UI preferences: kept locally until you remove them in Settings, clear Extension data, or uninstall
 • Spreadsheet contents: retained in your Google Sheets under your Google account’s retention controls. Deleting a row via Job Tracker (when you use delete) removes or updates that data in your sheet; uninstalling Job Tracker does not delete your Google Sheet. You can revoke Job Tracker’s access at any time in your Google Account permissions (Third-party access / Data & privacy) and delete sheet data directly in Google Sheets
 

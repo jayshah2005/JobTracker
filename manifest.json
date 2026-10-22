@@ -13,6 +13,7 @@
     "tabs"
   ],
   "host_permissions": [
+    "https://sheets.googleapis.com/*",
     "https://www.googleapis.com/*",
     "https://accounts.google.com/*",
     "https://oauth2.googleapis.com/*",

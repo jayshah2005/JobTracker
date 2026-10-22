@@ -1,4 +1,9 @@
-/* Simplify-style floating launcher — only shown on job posting pages. */
+/*
+ * Floating "Job Tracker" launcher injected by content/content.js on job
+ * posting pages (loaded via manifest content_scripts.css, which is CSP-safe).
+ * content.js also injects an equivalent minimal !important fallback in case
+ * this stylesheet is blocked or overridden by the host page.
+ */
 
 .jt-launcher {
   position: fixed;
@@ -83,14 +88,4 @@
 .jt-launcher-dismiss:hover {
   color: #111827;
   background: #f9fafb;
-}
-
-.jt-launcher.jt-applied .jt-launcher-btn {
-  border-color: #a7f3d0;
-  color: #065f46;
-}
-
-.jt-launcher.jt-applied .jt-launcher-btn:hover {
-  background: #ecfdf5;
-  border-color: #6ee7b7;
 }

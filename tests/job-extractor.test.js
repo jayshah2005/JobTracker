@@ -261,3 +261,92 @@ describe('normalizeDate', () => {
     expect(normalizeDate('2025-08-15T12:00:00Z')).toBe('2025-08-15');
   });
 });
+
+describe('regressions', () => {
+  test('normalizeDate rejects year-less strings that Date() would coerce to 2001', () => {
+    expect(normalizeDate('12')).toBe('');
+    expect(normalizeDate('Jan 5', new Date(2026, 5, 1))).toBe('2026-01-05');
+    expect(normalizeDate('Jan 5, 2024')).toBe('2024-01-05');
+  });
+
+  test('keeps non-Latin company names (key was empty before)', () => {
+    const doc = parseHtml(
+      `<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer",
+        "hiringOrganization":{"name":"株式会社テスト"}}</script>`,
+      'https://example.com/jobs/123456'
+    );
+    expect(extractJobData(doc, 'https://example.com/jobs/123456').company).toBe('株式会社テスト');
+  });
+});
+
+describe('normalizeDate policy: no date beats a wrong date', () => {
+  test.each([
+    ['2025-08-15', '2025-08-15'],
+    ['2025-08-15T23:59:00-05:00', '2025-08-15'],
+    ['Aug 15, 2025', '2025-08-15'],
+    ['August 15th, 2025', '2025-08-15'],
+    ['15 August 2025', '2025-08-15'],
+    ['Posted on Sept 3, 2024', '2024-09-03'],
+    ['25/12/2024', '2024-12-25'],
+    ['12/25/2024', '2024-12-25'],
+    ['03/03/2024', '2024-03-03'],
+  ])('accepts %s', (input, expected) => {
+    expect(normalizeDate(input)).toBe(expected);
+  });
+
+  test.each([
+    '03/04/2025', // d/m vs m/d ambiguous
+    '1.2.2025',
+    '1/5/24', // two-digit year
+    '12',
+    '20250815',
+    '1723680000',
+    '1995-03-01',
+    '1999-12-31',
+    '2999-01-01',
+    '2025-13-45',
+    '2025-02-30',
+    'Jan 5, 2024 - Feb 1, 2024', // several different dates
+    'Updated 3/4/2025',
+    null,
+    undefined,
+    '',
+  ])('rejects %p', (input) => {
+    expect(normalizeDate(input)).toBe('');
+  });
+
+  test('extractJobData drops a relative/ambiguous JSON-LD datePosted', () => {
+    const html = `<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer",
+      "hiringOrganization":{"name":"Acme"},"datePosted":"03/04/2025"}</script>`;
+    const data = extractJobData(parseHtml(html, 'https://acme.com/jobs/engineer-1234567'), 'https://acme.com/jobs/engineer-1234567');
+    expect(data.postedDate).toBe('');
+  });
+
+  test('extractJobData resolves "Posted 3 days ago" and drops ambiguous 04/05/2025', () => {
+    const html = '<body><h1>Engineer</h1><p>Posted 3 days ago</p><p>Posted: 04/05/2025</p></body>';
+    const data = extractJobData(parseHtml(html, 'https://acme.com/jobs/engineer-1234567'), 'https://acme.com/jobs/engineer-1234567');
+    expect(data.postedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('title / company cleaning', () => {
+  test('Apply button text is stripped from the role', () => {
+    const url = 'https://acme.com/jobs/engineer-1234567';
+    const html = `<body><h1>Senior Engineer<button>Apply</button></h1>
+      <script type="application/ld+json">{"@type":"JobPosting","hiringOrganization":{"name":"Acme"}}</script></body>`;
+    expect(extractJobData(parseHtml(html, url), url).role).toBe('Senior Engineer');
+  });
+
+  test('company suffixes like "Careers" are removed', () => {
+    const url = 'https://acme.com/jobs/engineer-1234567';
+    const html = `<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer",
+      "hiringOrganization":{"name":"Acme Careers"}}</script>`;
+    expect(extractJobData(parseHtml(html, url), url).company).toBe('Acme');
+  });
+
+  test('a company on its own domain is not penalised as a platform brand', () => {
+    const url = 'https://www.stripe.com/jobs/listing/engineer/5678901';
+    const html = `<head><meta property="og:site_name" content="Stripe"></head><body><h1>Engineer</h1></body>`;
+    expect(extractJobData(parseHtml(html, url), url).company).toBe('Stripe');
+  });
+});

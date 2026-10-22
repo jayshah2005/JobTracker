@@ -1,6 +1,12 @@
 /**
  * Google OAuth session orchestration for the service worker.
  * Owns identity launch + token refresh; no Sheets row logic, no side panel.
+ *
+ * Token lifecycle: tokens live in chrome.storage.local. Access tokens last
+ * ~1h; the long-lived refresh token is used to mint new ones silently. Only
+ * when Google says the refresh token is dead (invalid_grant) do we drop it and
+ * ask the user to sign in again — transient errors (offline, 5xx) never sign
+ * the user out. `withSheetAccess` is the one entry point other modules use.
  */
 
 import {
@@ -31,6 +37,7 @@ import {
   normalizeRedirectUri,
 } from '../lib/google-auth.js';
 
+/** Redirect URI Google Cloud must allow (https://<ext-id>.chromiumapp.org/). */
 export function getRedirectUri() {
   return normalizeRedirectUri(chrome.identity.getRedirectURL());
 }
@@ -43,6 +50,7 @@ async function resolveClientSecret() {
   return effectiveClientSecret(await getOAuthClientSecret());
 }
 
+/** Snapshot of OAuth configuration + whether a session exists (no network). */
 export async function getOauthSetup() {
   const storedId = await getOAuthClientId();
   const storedSecret = await getOAuthClientSecret();
@@ -63,6 +71,7 @@ export async function getOauthSetup() {
   };
 }
 
+/** Validate and persist a user-supplied Client ID (and optional secret). */
 export async function saveOauthClient(clientId, clientSecret) {
   const trimmed = String(clientId || '').trim();
   if (!isValidClientId(trimmed)) {
@@ -78,6 +87,10 @@ export async function saveOauthClient(clientId, clientSecret) {
   return { success: true, ...(await getOauthSetup()) };
 }
 
+/**
+ * Auth status for the UI. Silently refreshes an expired access token so
+ * opening the side panel does not bounce signed-in users to Sign in.
+ */
 export async function getAuthStatus() {
   const setup = await getOauthSetup();
   if (setup.needsSetup) {
@@ -92,23 +105,14 @@ export async function getAuthStatus() {
     };
   }
 
-  // Access tokens expire quickly; refresh silently so opening the side panel
-  // does not bounce signed-in users back to the Sign in screen.
   const token = await getGoogleToken();
   if (token?.refreshToken && !isAccessTokenFresh(token)) {
     try {
       await requestGoogleToken(false);
     } catch {
-      // Refresh failed — treat as signed out so the UI can offer Sign in.
-      return {
-        success: true,
-        signedIn: false,
-        needsSetup: false,
-        redirectUri: setup.redirectUri,
-        clientId: setup.clientId,
-        usingPublishedOAuth: setup.usingPublishedOAuth,
-        usingCustomClient: setup.usingCustomClient,
-      };
+      // If the refresh token was revoked it has been cleared, so the re-read
+      // below reports signed out. If the failure was transient (offline) the
+      // refresh token is kept and we still report signed in.
     }
   }
 
@@ -124,6 +128,7 @@ export async function getAuthStatus() {
   };
 }
 
+/** Promise wrapper for chrome.identity.launchWebAuthFlow (callback API). */
 function launchAuthFlow(url, interactive) {
   return new Promise((resolve, reject) => {
     chrome.identity.launchWebAuthFlow({ url, interactive }, (responseUrl) => {
@@ -136,7 +141,27 @@ function launchAuthFlow(url, interactive) {
   });
 }
 
+/** Shared in-flight silent refresh so parallel callers don't race on the refresh token. */
+let silentRefreshInFlight = null;
+
+/**
+ * Get a valid access token.
+ * 1. If a refresh token exists, try a silent refresh.
+ * 2. Otherwise (or if Google rejected the refresh token) and `interactive`,
+ *    open the Google consent window; if not interactive, throw SIGN_IN_REQUIRED.
+ */
 async function requestGoogleToken(interactive) {
+  if (!interactive) {
+    // Many UI calls can ask at once; share one refresh request.
+    silentRefreshInFlight ??= requestGoogleTokenUncached(false).finally(() => {
+      silentRefreshInFlight = null;
+    });
+    return silentRefreshInFlight;
+  }
+  return requestGoogleTokenUncached(true);
+}
+
+async function requestGoogleTokenUncached(interactive) {
   const clientId = await resolveClientId();
   if (!clientId) {
     throw new Error('Finish Google connection in Job Tracker first (the extension shows the steps).');
@@ -154,7 +179,13 @@ async function requestGoogleToken(interactive) {
       });
       await saveGoogleToken(refreshed);
       return refreshed.accessToken;
-    } catch {
+    } catch (err) {
+      // Only discard the session when Google says it is truly dead (revoked /
+      // expired refresh token or bad client). Network blips must not sign the
+      // user out. Errors without a `code` are fetch failures.
+      if (err.code !== 'invalid_grant' && err.code !== 'invalid_client') {
+        throw err;
+      }
       await clearGoogleToken();
       if (!interactive) throw new Error(SIGN_IN_REQUIRED);
     }
@@ -166,15 +197,22 @@ async function requestGoogleToken(interactive) {
 
   const redirectUri = getRedirectUri();
   const pkce = await createPkcePair();
+  // Persist the verifier: the service worker can be suspended while the
+  // consent window is open and would otherwise lose it.
   await saveOauthPkce({ verifier: pkce.verifier, redirectUri, clientId });
 
-  const url = buildGoogleAuthUrl({
-    clientId,
-    redirectUri,
-    codeChallenge: pkce.challenge,
-  });
-  const responseUrl = await launchAuthFlow(url, true);
-  const parsed = parseOAuthRedirect(responseUrl);
+  let parsed;
+  try {
+    const url = buildGoogleAuthUrl({
+      clientId,
+      redirectUri,
+      codeChallenge: pkce.challenge,
+    });
+    parsed = parseOAuthRedirect(await launchAuthFlow(url, true));
+  } catch (err) {
+    await clearOauthPkce();
+    throw err;
+  }
   if (!parsed.ok) {
     await clearOauthPkce();
     throw new Error(parsed.error);
@@ -196,6 +234,7 @@ async function requestGoogleToken(interactive) {
   }
 
   if (parsed.accessToken) {
+    // Legacy implicit response: no refresh token, so the session ends in ~1h.
     await saveGoogleToken({
       accessToken: parsed.accessToken,
       expiresAt: parsed.expiresAt,
@@ -207,6 +246,7 @@ async function requestGoogleToken(interactive) {
   throw new Error('Google did not return a sign-in code.');
 }
 
+/** Interactive sign-in (opens Google's consent window). Never throws. */
 export async function signIn() {
   try {
     const setup = await getOauthSetup();
@@ -220,20 +260,31 @@ export async function signIn() {
   }
 }
 
+/** Forget the stored token (the Client ID/secret are kept). */
 export async function signOut() {
   await clearGoogleToken();
   return { success: true, signedIn: false };
 }
 
+/**
+ * Run `fn(accessToken)` with a valid Google token.
+ * - Refreshes silently when the token is expired.
+ * - On a 401 (token revoked/expired early) drops only the access token, retries
+ *   once with a silent refresh, and falls back to the sign-in window.
+ * - All failures are rethrown as Errors with user-friendly messages.
+ */
 export async function withSheetAccess(fn) {
-  let tokenInfo = await getGoogleToken();
+  const tokenInfo = await getGoogleToken();
   let token = isAccessTokenFresh(tokenInfo) ? tokenInfo.accessToken : null;
 
   if (!token) {
     try {
       token = await requestGoogleToken(false);
-    } catch {
-      throw new Error(SIGN_IN_REQUIRED);
+    } catch (err) {
+      // Keep transient network problems distinguishable from "sign in again".
+      throw new Error(
+        err.message === SIGN_IN_REQUIRED ? SIGN_IN_REQUIRED : sheetsAccessError(err.message)
+      );
     }
   }
 
@@ -241,16 +292,19 @@ export async function withSheetAccess(fn) {
     return await fn(token);
   } catch (err) {
     const msg = err.message || '';
-    if (/401|invalid.?token|unauthenticated/i.test(msg)) {
-      await clearGoogleToken();
+    if (err.status === 401 || /\b401\b|invalid.?token|unauthenticated/i.test(msg)) {
+      // Keep the refresh token so the retry can be silent.
+      const latest = await getGoogleToken();
+      if (latest) await saveGoogleToken({ ...latest, accessToken: '', expiresAt: 0 });
       try {
         const fresh = await requestGoogleToken(true);
-        return fn(fresh);
-      } catch (refreshErr) {
-        throw new Error(sheetsAccessError(refreshErr.message));
+        // `await` is required: without it a failure of the retried call
+        // escapes this try/catch and skips the friendly-message translation.
+        return await fn(fresh);
+      } catch (retryErr) {
+        throw new Error(sheetsAccessError(retryErr.message));
       }
     }
     throw new Error(sheetsAccessError(msg));
   }
 }
-

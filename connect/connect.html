@@ -20,7 +20,7 @@
     </header>
 
     <main class="wrap">
-      <div id="status" class="status hidden" role="status"></div>
+      <div id="status" class="status hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <section class="intro" id="default-intro">
         <p id="default-intro-text">
@@ -34,7 +34,7 @@
           <h2>Sign in with Google</h2>
           <p id="sign-in-help">
             Sign in with the account that can edit your job tracker spreadsheet.
-            Then open Settings and paste a sheet link that account can edit.
+            Then paste a sheet link that account can edit in the side panel or Settings.
           </p>
           <div id="signed-out-default">
             <button type="button" class="btn btn-primary" id="sign-in-btn">
@@ -42,7 +42,7 @@
             </button>
           </div>
           <div id="signed-in-default" class="hidden">
-            <p class="connected">Google is connected. Close this tab and add a sheet in Settings.</p>
+            <p class="connected">Google is connected. Close this tab, then paste a sheet link in the Job Tracker side panel (or Settings).</p>
             <button type="button" class="btn btn-secondary" id="sign-out-btn">Sign out</button>
           </div>
         </li>
@@ -135,8 +135,8 @@
               </ol>
               <p class="uri-label">Authorized redirect URI (copy this):</p>
               <div class="uri-row">
-                <code id="redirect-uri"></code>
-                <button type="button" class="btn btn-secondary" id="copy-redirect">Copy</button>
+                <code id="redirect-uri" aria-label="Redirect URI"></code>
+                <button type="button" class="btn btn-secondary" id="copy-redirect" aria-label="Copy redirect URI">Copy</button>
               </div>
             </li>
 
@@ -198,7 +198,7 @@
             <p><strong>Cause:</strong> The redirect link in Google does not exactly match the one Job Tracker uses.</p>
             <p><strong>Fix:</strong></p>
             <ol>
-              <li>Open <strong>Advanced</strong> above and copy the redirect URI.</li>
+              <li>Open <strong>Advanced: use your own Google Cloud OAuth client</strong> above and copy the redirect URI.</li>
               <li>Open your OAuth client in Credentials.</li>
               <li>
                 Paste it under <strong>Authorized redirect URIs</strong> only — not under Authorized JavaScript origins.
@@ -229,7 +229,7 @@
           <summary>Client secret / invalid client / could not exchange code</summary>
           <div class="problem-body">
             <p><strong>Cause:</strong> Client ID and Client secret are missing, mistyped, or from different clients.</p>
-            <p><strong>Fix:</strong> Open <strong>Advanced</strong>, paste both values from the same OAuth client, click Save connection, then sign in.</p>
+            <p><strong>Fix:</strong> Open <strong>Advanced</strong> above, paste both values from the same OAuth client, click Save connection, then sign in.</p>
           </div>
         </details>
 
