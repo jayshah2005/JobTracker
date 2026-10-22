@@ -261,3 +261,21 @@ describe('normalizeDate', () => {
     expect(normalizeDate('2025-08-15T12:00:00Z')).toBe('2025-08-15');
   });
 });
+
+describe('regressions', () => {
+  test('normalizeDate rejects year-less strings that Date() would coerce to 2001', () => {
+    expect(normalizeDate('12')).toBe('');
+    expect(normalizeDate('Jan 5')).toBe('');
+    expect(normalizeDate('3 days ago')).toBe('');
+    expect(normalizeDate('Jan 5, 2024')).toBe('2024-01-05');
+  });
+
+  test('keeps non-Latin company names (key was empty before)', () => {
+    const doc = parseHtml(
+      `<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer",
+        "hiringOrganization":{"name":"株式会社テスト"}}</script>`,
+      'https://example.com/jobs/123456'
+    );
+    expect(extractJobData(doc, 'https://example.com/jobs/123456').company).toBe('株式会社テスト');
+  });
+});

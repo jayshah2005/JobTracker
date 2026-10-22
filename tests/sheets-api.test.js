@@ -7,6 +7,7 @@ import {
   rowIndexFromUpdatedRange,
   seedTabHeaders,
   setRowsBold,
+  loadSpreadsheetTabs,
 } from '../lib/sheets-api.js';
 
 describe('sheets-api', () => {
@@ -210,5 +211,31 @@ describe('sheets-api', () => {
         }),
       })
     );
+  });
+
+  test('apiRequest attaches the HTTP status to the error', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    });
+    await expect(apiRequest('https://example.com', 't')).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  test('loadSpreadsheetTabs propagates row read failures instead of returning an empty tab', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sheets: [{ properties: { sheetId: 0, title: 'Jobs' } }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({}),
+      });
+    await expect(loadSpreadsheetTabs('id', 't')).rejects.toThrow(/429/);
   });
 });

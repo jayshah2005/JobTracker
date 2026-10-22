@@ -1,3 +1,4 @@
+/* Shared base styles for the settings page: design tokens, buttons, cards, status banner. */
 :root {
   --jt-primary: #4f46e5;
   --jt-primary-hover: #4338ca;
@@ -499,4 +500,12 @@ select {
 
 #setup-sheet-url {
   margin-top: 8px;
+}
+
+/* Visible keyboard focus for buttons, links and summaries (inputs keep their own focus ring). */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--jt-primary);
+  outline-offset: 2px;
 }

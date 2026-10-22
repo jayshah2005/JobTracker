@@ -1,4 +1,4 @@
-import { findExistingApplication, urlsMatch } from '../lib/duplicates.js';
+import { findExistingApplication, urlsMatch, extractJobId } from '../lib/duplicates.js';
 import { buildDefaultMappings } from '../lib/field-mapper.js';
 
 describe('normalize / match URLs', () => {
@@ -192,5 +192,15 @@ describe('findExistingApplication', () => {
     );
     expect(sameTab.matched).toBe(true);
     expect(sameTab.spreadsheetId).toBe('s1');
+  });
+});
+
+describe('extractJobId robustness', () => {
+  test('matches id query params case-insensitively', () => {
+    expect(extractJobId('https://example.com/view?JobID=abc123')).toBe('abc123');
+  });
+
+  test('survives malformed percent-escapes in the path', () => {
+    expect(extractJobId('https://example.com/%E0%A4%A/jobs/987654')).toBe('987654');
   });
 });

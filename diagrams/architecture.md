@@ -98,7 +98,7 @@ flowchart LR
 ```
 
 - Detection (`isLikelyJobPage` / `jobPageSignals` in `lib/job-extractor.js`) is platform-general: URL shapes, schema.org JobPosting, and structural DOM signals — no site allow/block lists. Loose body keywords (“job”, “apply”) are never enough on their own, so inboxes and other app shells stay negative.
-- Full extract is DOM-only (no network) but heavier — preload only runs on likely job pages. Pipelines: Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, Indeed, then general JSON-LD (one or two `JobPosting` nodes only).
+- Full extract is DOM-only (no network) but heavier — preload only runs on likely job pages. Pipelines: Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, Indeed (`lib/extractors/`), plus the general JSON-LD/DOM strategies (one or two `JobPosting` nodes only) that fill whatever an ATS pipeline missed.
 - Cache TTL is 5 minutes; tab close / URL change clears it.
 - Launcher CSS is injected via `manifest.json` `content_scripts.css` (CSP-safe); AutoShow is Settings → “Show Job Tracker button on job pages”.
 - Content script is a **classic** (non-module) bootstrap with dynamic `import()` of libs. A general URL helper (`lib/job-page-url.js` → `classifyJobUrl` / `urlLooksLikeJobPosting`) short-circuits on posting-shaped URLs (job word + id/slug, job-id query params, jobs/careers hosts + id), then full DOM detection refines.
@@ -146,20 +146,27 @@ sequenceDiagram
 flowchart TB
   UI[Side panel / Options / Connect] -->|GET_AUTH_STATUS or SIGN_IN| Auth[google-session.js]
 
-  Auth --> setup{OAuth client configured?}
-  setup -->|no| Connect[connect page<br/>SAVE_OAUTH_CLIENT]
+  Auth --> setup{OAuth client configured?<br/>stored client or packed default}
+  setup -->|no| Connect[Set up Google page<br/>SAVE_OAUTH_CLIENT]
   setup -->|yes| token{Access token fresh?}
 
   token -->|yes| call[withSheetAccess fn token]
-  token -->|no| refresh[Refresh via refresh_token]
-  refresh -->|fail| interactive[launchWebAuthFlow PKCE]
-  interactive --> saveTok[save googleToken in local storage]
+  token -->|no| refresh[Silent refresh with refresh_token]
+  refresh -->|ok| saveTok[save googleToken in local storage]
   saveTok --> call
+  refresh -->|no refresh token or revoked| signin[Sign in required<br/>user clicks Sign in]
+  signin --> interactive[launchWebAuthFlow<br/>auth code + PKCE]
+  interactive --> saveTok
 
   call --> API[lib/sheets-api.js fetch]
-  API -->|401| once[Clear token, refresh once, retry]
-  API --> Sheets[googleapis.com Sheets]
+  API -->|401| once[Drop access token, refresh once, retry]
+  API --> Sheets[sheets.googleapis.com]
+  interactive -.-> OAuth[accounts.google.com / oauth2.googleapis.com]
+  refresh -.-> OAuth
 ```
+
+- `SIGN_OUT` only clears the stored token. It does not revoke access at Google and keeps the OAuth client settings and connected sheets.
+- The redirect URI is `https://<extension-id>.chromiumapp.org/` and must be listed exactly (trailing slash) on the Web-application OAuth client.
 
 ---
 
@@ -215,9 +222,9 @@ Default columns: Date Applied, Job ID, Company Name, Role, Location, Application
 flowchart TB
   subgraph local [chrome.storage.local]
     sheets[configuredSheets<br/>spreadsheet + tabs + mappings]
-    settings[settings<br/>autoShowPopup, embedRoleHyperlink…]
-    token[googleToken + oauth client]
-    undo[schema undo / redo stacks]
+    settings[settings<br/>autoShowPopup, embedRoleHyperlink]
+    token[googleToken, oauthPkce<br/>oauthClientId, oauthClientSecret]
+    undo[schemaUndoStack / schemaRedoStack]
   end
 
   subgraph session [chrome.storage.session]
@@ -226,13 +233,14 @@ flowchart TB
   end
 
   subgraph memory [Service worker RAM]
-    enabled[sidePanelEnabledTabs]
-    inflight[inflightExtracts dedupe]
+    enabled[sidePanelEnabledTabs<br/>side-panel.js]
+    inflight[inflightExtracts dedupe<br/>page-job-data.js]
   end
 
   Orch[sheets-orchestrator] --> sheets
   Orch --> undo
   Auth[google-session] --> token
+  Opt[options page] -->|getSettings / saveSettings| settings
   PJD[page-job-data] --> preload
   SP[sidepanel] --> draft
 ```
@@ -246,8 +254,8 @@ flowchart TB
 | **Content script** | Detect single postings (`classifyJobUrl` / `isLikelyJobPage`), show launcher, ask for preload, answer scrape requests |
 | **job-extractor + extractors/\*** | ATS pipelines (incl. LinkedIn, Indeed) + general JSON-LD/DOM fusion |
 | **Side panel** | Human form: review fields, pick sheet, save/update/delete |
-| **Options** | Connect spreadsheets, edit columns/types, prefs |
-| **Connect** | One-time Google OAuth client setup |
+| **Options** | Connect spreadsheets, edit columns/types/dropdown choices, undo/redo, sign in/out, prefs |
+| **Connect** (“Set up Google”) | OAuth client setup (Advanced, only when no built-in client) and troubleshooting |
 | **Service worker** | Traffic cop — routes messages, doesn’t own business logic |
 | **page-job-data** | Scrape tabs + session preload cache |
 | **google-session** | Sign-in and fresh tokens for Sheets |

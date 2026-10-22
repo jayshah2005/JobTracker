@@ -9,7 +9,7 @@ extension ZIP — use `npm run pack` for the upload package.
 npm run pack
 ```
 
-Creates `dist/job-tracker-<version>.zip` with:
+Creates `dist/job-tracker-<version>.zip` (version taken from `manifest.json`) with:
 
 - Runtime folders only (`background`, `connect`, `content`, `icons`, `lib`,
   `options`, `sidepanel`)
@@ -33,7 +33,7 @@ Store icon: use `icons/icon128.png` (generated from the brand mark).
 
 ## Before first publish
 
-1. Bump `version` in `manifest.json` (must increase on every upload).
+1. Bump `version` in `manifest.json` (must increase on every upload) and keep `package.json` on the same version; `npm run pack` refuses to build if they differ.
 2. Complete [`PUBLISHER_OAUTH.md`](PUBLISHER_OAUTH.md) (Cloud project, OAuth client, redirect URI, `.env.oauth`).
 3. Run `npm test` and `npm run pack` (pack injects OAuth from `.env.oauth`).
 4. Host site URLs on GitHub Pages: home `index.html` + `privacy.html` (privacy

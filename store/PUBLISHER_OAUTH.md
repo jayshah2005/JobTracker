@@ -122,7 +122,7 @@ npm test
 npm run pack
 ```
 
-The pack script injects those values into `dist/staging` only (not into your git working tree), then zips `dist/job-tracker-<version>.zip`.
+The pack script injects those values into `dist/staging` only (not into your git working tree), then zips `dist/job-tracker-<version>.zip`. `<version>` comes from `manifest.json`; `package.json` must have the same version. With no credentials set, the pack still succeeds but warns, and the resulting build makes users do the “Set up Google” Advanced steps themselves.
 
 You can also pass env vars inline:
 
@@ -199,7 +199,7 @@ Until verified, Google may show “unverified app” / limit who can sign in. Th
 ## 10. Costs reminder
 
 - No per-user OAuth fee  
-- Sheets API free within quotas (see earlier notes / Google’s limits docs)  
+- Sheets API is free within Google’s usage quotas (see Google’s Sheets API limits docs)  
 - Chrome Web Store: one-time $5 developer fee  
 - Verification: time/process, not a Google “OAuth tax”
 

@@ -671,6 +671,19 @@ select {
   border: 1px solid #fecaca;
 }
 
+.status-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* Keyboard focus ring for buttons and links (inputs have their own styles). */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+}
+
 .spinner {
   display: inline-block;
   width: 12px;

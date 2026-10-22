@@ -1,3 +1,17 @@
+/**
+ * Settings page (options/options.html).
+ *
+ * Responsibilities: Google sign-in/out, connecting spreadsheets, editing
+ * column headers / field types / dropdown choices (with undo + redo), and the
+ * two display preferences. All Google and storage work happens in the service
+ * worker via chrome.runtime messages (see sendMessage); this file only renders
+ * state and reports the result of every action in the #status banner.
+ *
+ * Sections: state -> startup -> auth -> sheets -> rendering -> worksheet rename
+ *           -> comboboxes -> schema changes -> dropdown choices -> undo/redo
+ *           -> helpers.
+ */
+
 import { FIELD_TAGS, FIELD_TAG_LABELS } from '../lib/constants.js';
 import {
   SCHEMA_OPS,
@@ -9,8 +23,11 @@ import { getSettings, saveSettings } from '../lib/storage.js';
 
 const $ = (sel) => document.querySelector(sel);
 
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
 let sheets = [];
-let settings = {};
 let undoStack = [];
 let redoStack = [];
 /** Remember which dropdown editors the user expanded. */
@@ -21,6 +38,11 @@ const activeWorksheetBySheet = new Map();
 /** Pending single-click tab switch — cancelled when a double-click starts rename. */
 let pendingWorksheetClick = null;
 
+/**
+ * Single click selects a worksheet tab; double click renames it. The click is
+ * delayed so a double click can cancel the pending selection (re-rendering on
+ * the first click would destroy the node before dblclick fires).
+ */
 function bindWorksheetTab(btn, spreadsheetId) {
   btn.addEventListener('click', () => {
     if (btn.classList.contains('is-editing')) return;
@@ -51,6 +73,11 @@ function dropdownEditorKey(sheetId, tabId, col) {
   return `${sheetId}:${tabId}:${col}`;
 }
 
+/**
+ * Make sure the active spreadsheet and worksheet still exist after a data
+ * change; fall back to the first one otherwise.
+ * @returns {{sheet: object, tab: object|null}|null} null when no sheets exist
+ */
 function ensureActiveSelections() {
   if (!sheets.length) {
     activeSpreadsheetId = null;
@@ -77,6 +104,11 @@ function ensureActiveSelections() {
 }
 
 let refreshOnVisibleTimer = null;
+let statusTimer = null;
+
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
 
 async function init() {
   $('#add-sheet-btn').addEventListener('click', handleAddSheet);
@@ -98,22 +130,33 @@ async function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (refreshOnVisibleTimer) clearTimeout(refreshOnVisibleTimer);
+    // Returning to this tab (e.g. after editing the sheet in Google) re-syncs
+    // headers and row counts. Debounced; skipped while the user is typing in
+    // the sheet list because a re-render would discard their input.
     refreshOnVisibleTimer = setTimeout(async () => {
       refreshOnVisibleTimer = null;
-      const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
-      if (!auth?.signedIn) return;
-      loadSheets({ fromNetwork: true, quiet: true });
+      if ($('#sheet-list').contains(document.activeElement) && isEditableTarget(document.activeElement)) return;
+      try {
+        const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
+        if (auth?.signedIn) await loadSheets({ fromNetwork: true, quiet: true });
+      } catch {
+        // Silent: this is a background refresh, not a user action.
+      }
     }, 400);
   });
 
-  await loadAuth();
-  const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
-  // Pull live headers/rows so manual Google Sheet edits show up.
-  await loadSheets({ fromNetwork: !!auth?.signedIn, quiet: true });
-  await loadSettings();
-  await loadUndoStack();
+  try {
+    const signedIn = await loadAuth();
+    // Pull live headers/rows so manual Google Sheet edits show up.
+    await loadSheets({ fromNetwork: signedIn, quiet: true });
+    await loadSettings();
+    await loadUndoStack();
+  } catch (err) {
+    showStatus(err.message || 'Could not load settings.', 'error');
+  }
 }
 
+/** True when the keyboard focus is in a text field (so Ctrl/Cmd+Z belongs to it). */
 function isEditableTarget(el) {
   if (!el || el === document.body) return false;
   const tag = el.tagName;
@@ -122,6 +165,7 @@ function isEditableTarget(el) {
   return false;
 }
 
+/** Ctrl/Cmd+Z, Shift+Z or Y trigger schema undo/redo when not typing in a field. */
 function handleSchemaHistoryShortcut(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod || e.altKey) return;
@@ -142,11 +186,17 @@ function handleSchemaHistoryShortcut(e) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Google account
+// ---------------------------------------------------------------------------
+
+/** Show the signed-in or signed-out card. @returns {Promise<boolean>} signed in? */
 async function loadAuth() {
   const res = await sendMessage({ type: 'GET_AUTH_STATUS' });
   const signedIn = !!res?.signedIn;
   $('#google-signed-in').classList.toggle('hidden', !signedIn);
   $('#google-signed-out').classList.toggle('hidden', signedIn);
+  return signedIn;
 }
 
 function openConnectPage() {
@@ -159,16 +209,18 @@ async function handleSignIn() {
   btn.textContent = 'Signing in…';
   try {
     const res = await sendMessage({ type: 'SIGN_IN' });
-    if (res.needsSetup) {
+    if (res?.needsSetup) {
       openConnectPage();
-      showStatus('Finish Google setup on the page that just opened.', 'error');
+      showStatus('Finish Google setup on the page that just opened, then sign in again.', 'error');
       return;
     }
-    if (res.success && res.signedIn) {
+    if (res?.success && res.signedIn) {
       await loadAuth();
       showStatus('Google connected. You can add any sheets this account can edit.', 'success');
+      // Pick up sheets that were saved before a previous sign-out.
+      loadSheets({ fromNetwork: true, quiet: true }).catch(() => {});
     } else {
-      showStatus(res.error || 'Google sign-in was cancelled.', 'error');
+      showStatus(res?.error || 'Google sign-in was cancelled.', 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
@@ -179,10 +231,27 @@ async function handleSignIn() {
 }
 
 async function handleSignOut() {
-  await sendMessage({ type: 'SIGN_OUT' });
-  await loadAuth();
-  showStatus('Signed out. Sign in again to read or update sheets.', 'success');
+  try {
+    await sendMessage({ type: 'SIGN_OUT' });
+    await loadAuth();
+    // Sign-out only forgets the local token; connected sheets stay listed.
+    showStatus('Signed out. Your sheets stay listed; sign in again to read or update them.', 'success');
+  } catch (err) {
+    showStatus(err.message || 'Could not sign out.', 'error');
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Loading data
+// ---------------------------------------------------------------------------
+
+/**
+ * Load connected sheets into state and render them.
+ * @param {{fromNetwork?: boolean, quiet?: boolean}} opts fromNetwork re-reads
+ *   headers from Google (REFRESH_SHEETS) and falls back to the cache on
+ *   failure; quiet suppresses the error banner for background refreshes.
+ * @returns {Promise<boolean>} false when a network refresh failed
+ */
 
 async function loadSheets({ fromNetwork = false, quiet = false } = {}) {
   const res = await sendMessage({
@@ -200,7 +269,7 @@ async function loadSheets({ fromNetwork = false, quiet = false } = {}) {
     return false;
   }
 
-  sheets = res.sheets || [];
+  sheets = res?.sheets || [];
   renderSheetList();
   await syncDropdownColumnsFromSheet();
   return true;
@@ -260,30 +329,40 @@ function getColumnUniqueValues(tab, columnIndex) {
 }
 
 async function loadSettings() {
-  settings = await getSettings();
+  const settings = await getSettings();
   $('#auto-show').checked = settings.autoShowPopup !== false;
   $('#embed-role-link').checked = settings.embedRoleHyperlink !== false;
 }
 
 async function loadUndoStack() {
   const res = await sendMessage({ type: 'GET_UNDO_STACK' });
-  undoStack = res.stack || [];
-  redoStack = res.redoStack || [];
+  undoStack = res?.stack || [];
+  redoStack = res?.redoStack || [];
   renderUndoBar();
 }
 
+/** Persist both preference checkboxes and confirm to the user. */
 async function saveSettingsFromUI() {
-  await saveSettings({
-    autoShowPopup: $('#auto-show').checked,
-    embedRoleHyperlink: $('#embed-role-link').checked,
-  });
-  settings = await getSettings();
+  try {
+    await saveSettings({
+      autoShowPopup: $('#auto-show').checked,
+      embedRoleHyperlink: $('#embed-role-link').checked,
+    });
+    showStatus('Preference saved.', 'success');
+  } catch (err) {
+    showStatus(err.message || 'Could not save preference.', 'error');
+    await loadSettings();
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Spreadsheets: add / refresh / remove
+// ---------------------------------------------------------------------------
 
 async function handleAddSheet() {
   const url = $('#sheet-url').value.trim();
   if (!url) {
-    showStatus('Please paste a Google Sheets URL.', 'error');
+    showStatus('Paste a Google Sheets link first.', 'error');
     return;
   }
 
@@ -299,7 +378,7 @@ async function handleAddSheet() {
 
   try {
     const res = await sendMessage({ type: 'ADD_SHEET', url });
-    if (res.success) {
+    if (res?.success) {
       sheets = res.sheets;
       if (res.sheet?.spreadsheetId) {
         activeSpreadsheetId = res.sheet.spreadsheetId;
@@ -308,9 +387,9 @@ async function handleAddSheet() {
       }
       $('#sheet-url').value = '';
       renderSheetList();
-      showStatus('Sheet added successfully!', 'success');
+      showStatus(`Added “${res.sheet?.name || 'spreadsheet'}”.`, 'success');
     } else {
-      showStatus(res.error || 'Failed to add sheet.', 'error');
+      showStatus(res?.error || 'Failed to add sheet.', 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
@@ -336,6 +415,11 @@ async function handleRefresh() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+/** Show/hide the schema-history bar and label the next undo/redo step. */
 function renderUndoBar() {
   const bar = $('#undo-bar');
   const undoBtn = $('#undo-btn');
@@ -351,11 +435,9 @@ function renderUndoBar() {
   if (undoStack.length) {
     const last = undoStack[undoStack.length - 1];
     label.textContent = `Last change: ${last.label} (${last.tabName})`;
-  } else if (redoStack.length) {
+  } else {
     const next = redoStack[redoStack.length - 1];
     label.textContent = `Ready to redo: ${next.label} (${next.tabName})`;
-  } else {
-    label.textContent = '';
   }
 
   undoBtn.disabled = !undoStack.length;
@@ -368,6 +450,7 @@ function renderUndoBar() {
     : 'Redo';
 }
 
+/** Re-render the whole sheet workspace and rebind every control inside it. */
 function renderSheetList() {
   const container = $('#sheet-list');
 
@@ -480,6 +563,7 @@ function renderSheetList() {
   });
 }
 
+/** Markup for one spreadsheet: toolbar, worksheet tabs, and active tab body. */
 function renderSheetPanel(sheet, tab) {
   const worksheets = sheet.tabs || [];
   const worksheetTabs = worksheets
@@ -526,6 +610,11 @@ function renderSheetPanel(sheet, tab) {
     </div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Worksheet tab rename
+// ---------------------------------------------------------------------------
+
+/** Swap a worksheet tab button for an inline text input; Enter saves, Esc cancels. */
 function beginWorksheetRename(tabBtn) {
   if (tabBtn.classList.contains('is-editing')) return;
 
@@ -639,6 +728,10 @@ function beginWorksheetRename(tabBtn) {
   input.addEventListener('mousedown', (e) => e.stopPropagation());
 }
 
+/**
+ * When a Custom Dropdown editor is first opened and has no choices (or no
+ * cached sheet values), read the column from Google once and fill it in.
+ */
 async function maybeSyncOnOpen(detailsEl) {
   if (detailsEl.dataset.synced === '1') return;
   const spreadsheetId = detailsEl.dataset.sheet;
@@ -653,13 +746,18 @@ async function maybeSyncOnOpen(detailsEl) {
     return;
   }
 
-  const res = await sendMessage({
-    type: 'SYNC_TAB_COLUMN_UNIQUES',
-    spreadsheetId,
-    tabId,
-    autoApplyEmptyDropdowns: true,
-    columnIndex,
-  });
+  let res;
+  try {
+    res = await sendMessage({
+      type: 'SYNC_TAB_COLUMN_UNIQUES',
+      spreadsheetId,
+      tabId,
+      autoApplyEmptyDropdowns: true,
+      columnIndex,
+    });
+  } catch {
+    return; // Silent: the "Scan sheet" button remains for a manual retry.
+  }
   detailsEl.dataset.synced = '1';
   if (res?.success && res.sheets) {
     sheets = res.sheets;
@@ -672,6 +770,7 @@ async function maybeSyncOnOpen(detailsEl) {
   }
 }
 
+/** Markup for the column-mapping table (plus dropdown editors) of one tab. */
 function renderTabMappings(sheet, tab) {
   const mappings = tab.mappings || [];
   const rows = mappings
@@ -833,7 +932,8 @@ function renderTabMappings(sheet, tab) {
           data-sheet="${sheet.spreadsheetId}"
           data-tab="${tab.gid}"
           data-col="${m.columnIndex}"
-          title="Rename column header" />
+          title="Rename column header"
+          aria-label="Column name" />
       </td>
       <td>
         ${renderTagCombobox(sheet.spreadsheetId, tab.gid, m.columnIndex, m.tag)}
@@ -841,13 +941,13 @@ function renderTabMappings(sheet, tab) {
       <td class="col-actions">
         <button class="btn btn-secondary btn-xs" data-col-action="up"
           data-sheet="${sheet.spreadsheetId}" data-tab="${tab.gid}" data-col="${m.columnIndex}"
-          title="Move left" ${i === 0 ? 'disabled' : ''}>↑</button>
+          title="Move left" aria-label="Move column left" ${i === 0 ? 'disabled' : ''}>↑</button>
         <button class="btn btn-secondary btn-xs" data-col-action="down"
           data-sheet="${sheet.spreadsheetId}" data-tab="${tab.gid}" data-col="${m.columnIndex}"
-          title="Move right" ${i === mappings.length - 1 ? 'disabled' : ''}>↓</button>
+          title="Move right" aria-label="Move column right" ${i === mappings.length - 1 ? 'disabled' : ''}>↓</button>
         <button class="btn btn-danger btn-xs" data-col-action="delete"
           data-sheet="${sheet.spreadsheetId}" data-tab="${tab.gid}" data-col="${m.columnIndex}"
-          title="Delete column">✕</button>
+          title="Delete column" aria-label="Delete column">✕</button>
       </td>
     </tr>
     ${dropdownEditor}`;
@@ -881,6 +981,7 @@ function renderTabMappings(sheet, tab) {
     </div>`;
 }
 
+/** Markup for the field-type combobox; behavior is added by bindTagComboboxes. */
 function renderTagCombobox(spreadsheetId, tabId, columnIndex, selectedTag) {
   const label = FIELD_TAG_LABELS[selectedTag] || selectedTag || 'Choose type';
   const options = Object.entries(FIELD_TAG_LABELS).map(([value, text]) => ({
@@ -905,6 +1006,7 @@ function renderTagCombobox(spreadsheetId, tabId, columnIndex, selectedTag) {
           placeholder="Search field types…"
           autocomplete="off"
           spellcheck="false"
+          aria-label="Field type"
           aria-autocomplete="list"
           aria-expanded="false"
           role="combobox" />
@@ -915,334 +1017,237 @@ function renderTagCombobox(spreadsheetId, tabId, columnIndex, selectedTag) {
 }
 
 /**
- * Searchable field-type dropdown (same interaction as save-form text dropdowns).
+ * Wire up one searchable combobox (text input + caret + listbox menu).
+ * Shared by the field-type picker and the dropdown-default picker so both
+ * behave identically.
+ *
+ * @param {HTMLElement} root  element carrying data-value / data-options
+ * @param {object} cfg
+ * @param {Array<{value:string,label:string}>} cfg.fallbackOptions used if data-options is unreadable
+ * @param {string} cfg.emptyText     menu text when the search matches nothing
+ * @param {boolean} cfg.matchValue   also match the search text against option values
+ * @param {boolean} cfg.enterPicksFirstMenuItem Enter picks the first visible item (else best label match)
+ * @param {(value:string,label:string)=>Promise<void>|void} cfg.onPick called when the user changes the value
  */
-function bindTagComboboxes(container) {
-  container.querySelectorAll('[data-tag-combo]').forEach((root) => {
-    const input = root.querySelector('.combo-input');
-    const menu = root.querySelector('.combo-menu');
-    const caret = root.querySelector('.combo-caret');
-    if (!input || !menu) return;
+function bindCombobox(root, cfg) {
+  const input = root.querySelector('.combo-input');
+  const menu = root.querySelector('.combo-menu');
+  const caret = root.querySelector('.combo-caret');
+  if (!input || !menu || input.disabled) return;
 
-    let options = [];
-    try {
-      options = JSON.parse(decodeURIComponent(root.dataset.options || '')) || [];
-    } catch {
-      options = Object.entries(FIELD_TAG_LABELS).map(([value, label]) => ({
-        value,
-        label,
-      }));
+  let options = [];
+  try {
+    options = JSON.parse(decodeURIComponent(root.dataset.options || '')) || [];
+  } catch {
+    options = cfg.fallbackOptions;
+  }
+
+  let committedValue = root.dataset.value || '';
+  let committedLabel =
+    options.find((o) => o.value === committedValue)?.label || input.value || '';
+  let open = false;
+  // Why: the input blurs when the user clicks the menu or caret; without this
+  // flag the blur handler would close the menu before the click registers.
+  let suppressBlur = false;
+
+  const setCommitted = (value, label) => {
+    committedValue = value;
+    committedLabel = label;
+    root.dataset.value = value;
+    input.dataset.committed = label;
+    input.value = label;
+  };
+
+  const renderMenu = (query = '') => {
+    const q = String(query || '').trim().toLowerCase();
+    const filtered = q
+      ? options.filter(
+          (o) =>
+            o.label.toLowerCase().includes(q) ||
+            (cfg.matchValue && o.value.toLowerCase().includes(q))
+        )
+      : options.slice();
+
+    if (!filtered.length) {
+      menu.innerHTML = `<li class="combo-empty">${escapeHtml(cfg.emptyText)}</li>`;
+      return;
     }
 
-    let committedValue = root.dataset.value || '';
-    let committedLabel =
-      FIELD_TAG_LABELS[committedValue] || input.value || '';
-    let open = false;
-    let suppressBlur = false;
+    menu.innerHTML = filtered
+      .map((opt) => {
+        const selected = opt.value === committedValue;
+        return `
+          <li class="combo-item${selected ? ' is-selected' : ''}" role="option" aria-selected="${selected}">
+            <button type="button" class="combo-pick" data-pick="${escapeHtml(opt.value)}" data-label="${escapeHtml(opt.label)}">
+              ${escapeHtml(opt.label)}
+            </button>
+          </li>`;
+      })
+      .join('');
+  };
 
-    const setCommitted = (value, label) => {
-      committedValue = value;
-      committedLabel = label;
-      root.dataset.value = value;
-      input.dataset.committed = label;
-      input.value = label;
-    };
+  const openMenu = ({ reset = false } = {}) => {
+    if (root.classList.contains('is-disabled')) return;
+    open = true;
+    root.classList.add('is-open');
+    input.setAttribute('aria-expanded', 'true');
+    menu.classList.remove('hidden');
+    // reset clears the text so the full list shows; typing then filters it.
+    if (reset) input.value = '';
+    renderMenu(reset ? '' : input.value);
+  };
 
-    const renderMenu = (query = '') => {
-      const q = String(query || '').trim().toLowerCase();
-      const filtered = q
-        ? options.filter(
-            (o) =>
-              o.label.toLowerCase().includes(q) ||
-              o.value.toLowerCase().includes(q)
-          )
-        : options.slice();
+  const closeMenu = ({ restore = false } = {}) => {
+    open = false;
+    root.classList.remove('is-open');
+    input.setAttribute('aria-expanded', 'false');
+    menu.classList.add('hidden');
+    if (restore) input.value = committedLabel;
+  };
 
-      if (!filtered.length) {
-        menu.innerHTML = `<li class="combo-empty">No matching field types</li>`;
-        return;
-      }
+  const pickValue = async (value, label) => {
+    const prev = committedValue;
+    setCommitted(value, label);
+    closeMenu();
+    if (value !== prev) await cfg.onPick(value, label);
+  };
 
-      menu.innerHTML = filtered
-        .map((opt) => {
-          const selected = opt.value === committedValue ? ' is-selected' : '';
-          return `
-            <li class="combo-item${selected}" role="option">
-              <button type="button" class="combo-pick" data-pick="${escapeHtml(opt.value)}" data-label="${escapeHtml(opt.label)}">
-                ${escapeHtml(opt.label)}
-              </button>
-            </li>`;
-        })
-        .join('');
-    };
+  input.addEventListener('focus', () => openMenu({ reset: true }));
+  input.addEventListener('click', () => {
+    if (!open || input.value !== '') openMenu({ reset: true });
+  });
 
-    const openMenu = ({ reset = false } = {}) => {
-      open = true;
-      root.classList.add('is-open');
-      input.setAttribute('aria-expanded', 'true');
-      menu.classList.remove('hidden');
-      if (reset) {
-        input.value = '';
-        renderMenu('');
-      } else {
-        renderMenu(input.value);
-      }
-    };
-
-    const closeMenu = ({ restore = false } = {}) => {
-      open = false;
-      root.classList.remove('is-open');
-      input.setAttribute('aria-expanded', 'false');
-      menu.classList.add('hidden');
-      if (restore) input.value = committedLabel;
-    };
-
-    const pickValue = async (value, label) => {
-      const spreadsheetId = root.dataset.sheet;
-      const tabId = root.dataset.tab;
-      const columnIndex = parseInt(root.dataset.col, 10);
-      const prev = committedValue;
-      setCommitted(value, label);
-      closeMenu();
-      if (value === prev) return;
-
-      if (value === FIELD_TAGS.CUSTOM_DROPDOWN) {
-        openDropdownEditors.add(
-          dropdownEditorKey(spreadsheetId, tabId, columnIndex)
-        );
-      }
-
-      await applyChange(spreadsheetId, tabId, {
-        op: SCHEMA_OPS.CHANGE_TAG,
-        columnIndex,
-        newTag: value,
-      });
-    };
-
-    input.addEventListener('focus', () => openMenu({ reset: true }));
-    input.addEventListener('click', () => {
-      if (!open) openMenu({ reset: true });
-      else if (input.value !== '') openMenu({ reset: true });
-    });
-
-    caret.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      suppressBlur = true;
-      if (open) closeMenu({ restore: true });
-      else {
-        input.focus();
-        openMenu({ reset: true });
-      }
-      setTimeout(() => {
-        suppressBlur = false;
-      }, 0);
-    });
-
-    input.addEventListener('input', () => {
-      if (!open) openMenu({ reset: false });
-      else renderMenu(input.value);
-    });
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeMenu({ restore: true });
-        input.blur();
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const q = input.value.trim().toLowerCase();
-        const match =
-          options.find((o) => o.label.toLowerCase() === q) ||
-          options.find((o) => o.label.toLowerCase().includes(q));
-        if (match) pickValue(match.value, match.label);
-        else closeMenu({ restore: true });
-      }
-    });
-
-    input.addEventListener('blur', () => {
-      setTimeout(() => {
-        if (suppressBlur || !open) return;
-        closeMenu({ restore: true });
-      }, 120);
-    });
-
-    menu.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      suppressBlur = true;
-    });
-
-    menu.addEventListener('click', (e) => {
-      const pickBtn = e.target.closest('[data-pick]');
-      if (!pickBtn) return;
-      pickValue(pickBtn.dataset.pick, pickBtn.dataset.label);
+  caret?.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    suppressBlur = true;
+    if (open) {
+      closeMenu({ restore: true });
+    } else {
+      input.focus();
+      openMenu({ reset: true });
+    }
+    setTimeout(() => {
       suppressBlur = false;
+    }, 0);
+  });
+
+  input.addEventListener('input', () => {
+    if (!open) openMenu({ reset: false });
+    else renderMenu(input.value);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMenu({ restore: true });
+      input.blur();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) openMenu({ reset: true });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      let match = null;
+      if (cfg.enterPicksFirstMenuItem) {
+        const first = menu.querySelector('.combo-pick');
+        if (first) match = { value: first.dataset.pick, label: first.dataset.label };
+      } else {
+        const q = input.value.trim().toLowerCase();
+        match =
+          options.find((o) => o.label.toLowerCase() === q) ||
+          options.find((o) => o.label.toLowerCase().includes(q)) ||
+          null;
+      }
+      if (match) pickValue(match.value, match.label);
+      else closeMenu({ restore: true });
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    // Delay so a click on a menu item lands before the menu closes.
+    setTimeout(() => {
+      if (suppressBlur || !open) return;
+      closeMenu({ restore: true });
+    }, 120);
+  });
+
+  menu.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    suppressBlur = true;
+  });
+
+  menu.addEventListener('click', (e) => {
+    const pickBtn = e.target.closest('[data-pick]');
+    if (!pickBtn) return;
+    pickValue(pickBtn.dataset.pick, pickBtn.dataset.label);
+    suppressBlur = false;
+  });
+}
+
+/** Searchable field-type picker (mapping table "Field Type" column). */
+function bindTagComboboxes(container) {
+  const fallbackOptions = Object.entries(FIELD_TAG_LABELS).map(([value, label]) => ({
+    value,
+    label,
+  }));
+  container.querySelectorAll('[data-tag-combo]').forEach((root) => {
+    bindCombobox(root, {
+      fallbackOptions,
+      emptyText: 'No matching field types',
+      matchValue: true,
+      enterPicksFirstMenuItem: false,
+      onPick: async (value) => {
+        const { sheet: spreadsheetId, tab: tabId } = root.dataset;
+        const columnIndex = parseInt(root.dataset.col, 10);
+        if (value === FIELD_TAGS.CUSTOM_DROPDOWN) {
+          // Open the choices editor right away so the user can add options.
+          openDropdownEditors.add(dropdownEditorKey(spreadsheetId, tabId, columnIndex));
+        }
+        await applyChange(spreadsheetId, tabId, {
+          op: SCHEMA_OPS.CHANGE_TAG,
+          columnIndex,
+          newTag: value,
+        });
+      },
     });
   });
 }
 
-/**
- * Searchable default-value picker for Custom Dropdown columns.
- */
+/** Searchable default-value picker for Custom Dropdown columns. */
 function bindDefaultComboboxes(container) {
   container.querySelectorAll('[data-default-combo]').forEach((root) => {
-    const input = root.querySelector('.combo-input');
-    const menu = root.querySelector('.combo-menu');
-    const caret = root.querySelector('.combo-caret');
-    if (!input || !menu || input.disabled) return;
-
-    let options = [];
-    try {
-      options = JSON.parse(decodeURIComponent(root.dataset.options || '')) || [];
-    } catch {
-      options = [{ value: '', label: 'No default' }];
-    }
-
-    let committedValue = root.dataset.value || '';
-    let committedLabel =
-      options.find((o) => o.value === committedValue)?.label ||
-      input.value ||
-      'No default';
-    let open = false;
-    let suppressBlur = false;
-
-    const setCommitted = (value, label) => {
-      committedValue = value;
-      committedLabel = label;
-      root.dataset.value = value;
-      input.dataset.committed = label;
-      input.value = label;
-    };
-
-    const renderMenu = (query = '') => {
-      const q = String(query || '').trim().toLowerCase();
-      const filtered = q
-        ? options.filter((o) => o.label.toLowerCase().includes(q))
-        : options.slice();
-
-      if (!filtered.length) {
-        menu.innerHTML = `<li class="combo-empty">No matching defaults</li>`;
-        return;
-      }
-
-      menu.innerHTML = filtered
-        .map((opt) => {
-          const selected = opt.value === committedValue ? ' is-selected' : '';
-          return `
-            <li class="combo-item${selected}" role="option">
-              <button type="button" class="combo-pick" data-pick="${escapeHtml(opt.value)}" data-label="${escapeHtml(opt.label)}">
-                ${escapeHtml(opt.label)}
-              </button>
-            </li>`;
-        })
-        .join('');
-    };
-
-    const openMenu = ({ reset = false } = {}) => {
-      if (root.classList.contains('is-disabled')) return;
-      open = true;
-      root.classList.add('is-open');
-      input.setAttribute('aria-expanded', 'true');
-      menu.classList.remove('hidden');
-      if (reset) {
-        input.value = '';
-        renderMenu('');
-      } else {
-        renderMenu(input.value);
-      }
-    };
-
-    const closeMenu = ({ restore = false } = {}) => {
-      open = false;
-      root.classList.remove('is-open');
-      input.setAttribute('aria-expanded', 'false');
-      menu.classList.add('hidden');
-      if (restore) input.value = committedLabel;
-    };
-
-    const pickValue = async (value, label) => {
-      const spreadsheetId = root.dataset.sheet;
-      const tabId = root.dataset.tab;
-      const columnIndex = parseInt(root.dataset.col, 10);
-      const prev = committedValue;
-      setCommitted(value, label);
-      closeMenu();
-      if (value === prev) return;
-
-      const mapping = getMapping(spreadsheetId, tabId, columnIndex);
-      const dropdownOptions = normalizeDropdownOptions(mapping?.dropdownOptions);
-      await saveDropdownOptions(
-        spreadsheetId,
-        tabId,
-        columnIndex,
-        dropdownOptions,
-        value
-      );
-    };
-
-    input.addEventListener('focus', () => openMenu({ reset: true }));
-    input.addEventListener('click', () => {
-      if (!open) openMenu({ reset: true });
-      else if (input.value !== '') openMenu({ reset: true });
-    });
-
-    caret?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      suppressBlur = true;
-      if (open) closeMenu({ restore: true });
-      else {
-        input.focus();
-        openMenu({ reset: true });
-      }
-      setTimeout(() => {
-        suppressBlur = false;
-      }, 0);
-    });
-
-    input.addEventListener('input', () => {
-      if (!open) openMenu({ reset: false });
-      else renderMenu(input.value);
-    });
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeMenu({ restore: true });
-        input.blur();
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        const first = menu.querySelector('.combo-pick');
-        if (first) pickValue(first.dataset.pick, first.dataset.label);
-        else closeMenu({ restore: true });
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (!open) openMenu({ reset: true });
-      }
-    });
-
-    input.addEventListener('blur', () => {
-      if (suppressBlur) return;
-      setTimeout(() => closeMenu({ restore: true }), 120);
-    });
-
-    menu.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      suppressBlur = true;
-    });
-
-    menu.addEventListener('click', (e) => {
-      const pickBtn = e.target.closest('[data-pick]');
-      if (!pickBtn) return;
-      pickValue(pickBtn.dataset.pick, pickBtn.dataset.label);
-      suppressBlur = false;
+    bindCombobox(root, {
+      fallbackOptions: [{ value: '', label: 'No default' }],
+      emptyText: 'No matching defaults',
+      matchValue: false,
+      enterPicksFirstMenuItem: true,
+      onPick: async (value) => {
+        const { sheet: spreadsheetId, tab: tabId } = root.dataset;
+        const columnIndex = parseInt(root.dataset.col, 10);
+        const mapping = getMapping(spreadsheetId, tabId, columnIndex);
+        await saveDropdownOptions(
+          spreadsheetId,
+          tabId,
+          columnIndex,
+          normalizeDropdownOptions(mapping?.dropdownOptions),
+          value
+        );
+      },
     });
   });
 }
 
+// ---------------------------------------------------------------------------
+// Schema changes (rename / retype / move / add / delete columns)
+// ---------------------------------------------------------------------------
+
+/**
+ * Send one schema edit to the background and refresh the UI.
+ * Destructive ops ask for confirmation first. On any failure the sheet list is
+ * re-rendered so optimistic UI (typed header, picked field type) reverts.
+ * @returns {Promise<object|null>} the response, or null if cancelled/failed
+ */
 async function applyChange(spreadsheetId, tabId, change) {
   const destructive = isDestructiveOp(change.op);
-  let confirmed = !destructive;
 
   const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
   const tab = sheet?.tabs?.find((t) => t.gid === tabId);
@@ -1252,24 +1257,34 @@ async function applyChange(spreadsheetId, tabId, change) {
     const extra = willSyncNow
       ? '\n\nThis will rewrite the header row in Google Sheets right away.'
       : '\n\nHeaders will be written to Google Sheets when this new tab is seeded.';
-    confirmed = confirm(`${DESTRUCTIVE_WARNING}${extra}\n\nContinue?`);
-    if (!confirmed) return null;
+    if (!confirm(`${DESTRUCTIVE_WARNING}${extra}\n\nContinue?`)) {
+      renderSheetList(); // revert any optimistic UI (e.g. picked field type)
+      return null;
+    }
   }
 
-  const res = await sendMessage({
-    type: 'APPLY_SCHEMA_CHANGE',
-    spreadsheetId,
-    tabId,
-    change,
-    confirmed: true,
-  });
+  let res;
+  try {
+    res = await sendMessage({
+      type: 'APPLY_SCHEMA_CHANGE',
+      spreadsheetId,
+      tabId,
+      change,
+      // The user already confirmed above (or the op is not destructive).
+      confirmed: true,
+    });
+  } catch (err) {
+    res = { success: false, error: err.message };
+  }
 
-  if (!res.success) {
-    if (res.needsConfirmation) {
-      showStatus(res.warning || DESTRUCTIVE_WARNING, 'error');
-    } else {
-      showStatus(res.error || 'Could not update columns.', 'error');
-    }
+  if (!res?.success) {
+    renderSheetList();
+    showStatus(
+      res?.needsConfirmation
+        ? res.warning || DESTRUCTIVE_WARNING
+        : res?.error || 'Could not update columns.',
+      'error'
+    );
     return null;
   }
 
@@ -1287,12 +1302,13 @@ async function applyChange(spreadsheetId, tabId, change) {
   return res;
 }
 
+/** Header input "change" handler: rename a column (empty names are rejected). */
 async function onHeaderRename(e) {
   const input = e.target;
   const newHeader = input.value.trim();
   if (!newHeader) {
     showStatus('Column name cannot be empty.', 'error');
-    await loadSheets();
+    renderSheetList(); // restore the previous header text
     return;
   }
 
@@ -1302,6 +1318,10 @@ async function onHeaderRename(e) {
     newHeader,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Dropdown choices
+// ---------------------------------------------------------------------------
 
 function getMapping(spreadsheetId, tabId, columnIndex) {
   const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
@@ -1314,6 +1334,7 @@ function getTab(spreadsheetId, tabId) {
   return sheet?.tabs?.find((t) => t.gid === tabId || t.tabId === tabId) || null;
 }
 
+/** Save a column's dropdown choices (and default) as an undoable schema change. */
 async function saveDropdownOptions(
   spreadsheetId,
   tabId,
@@ -1362,6 +1383,7 @@ async function onAddDropdownOptionFromInput(input) {
   await saveDropdownOptions(spreadsheetId, tabId, columnIndex, [...existing, value]);
 }
 
+/** Clicking a "In this sheet column" chip adds that value as a choice. */
 async function onAddSuggestion(e) {
   const btn = e.currentTarget;
   const spreadsheetId = btn.dataset.sheet;
@@ -1379,14 +1401,19 @@ async function onImportSheetOptions(e) {
   const tabId = btn.dataset.tab;
   const columnIndex = parseInt(btn.dataset.col, 10);
 
-  const res = await sendMessage({
-    type: 'SYNC_TAB_COLUMN_UNIQUES',
-    spreadsheetId,
-    tabId,
-    autoApplyEmptyDropdowns: false,
-    columnIndex,
-  });
-  if (res?.success && res.sheets) sheets = res.sheets;
+  try {
+    const res = await sendMessage({
+      type: 'SYNC_TAB_COLUMN_UNIQUES',
+      spreadsheetId,
+      tabId,
+      autoApplyEmptyDropdowns: false,
+      columnIndex,
+    });
+    if (res?.success && res.sheets) sheets = res.sheets;
+  } catch (err) {
+    showStatus(err.message || 'Could not read this sheet column.', 'error');
+    return;
+  }
 
   const tab = getTab(spreadsheetId, tabId);
   const mapping = getMapping(spreadsheetId, tabId, columnIndex);
@@ -1412,14 +1439,19 @@ async function onRefreshColumnUniques(e) {
   const tabId = btn.dataset.tab;
   const columnIndex = parseInt(btn.dataset.col, 10);
   btn.disabled = true;
-  const res = await sendMessage({
-    type: 'SYNC_TAB_COLUMN_UNIQUES',
-    spreadsheetId,
-    tabId,
-    autoApplyEmptyDropdowns: true,
-    applyColumnIndex: columnIndex,
-    columnIndex,
-  });
+  let res;
+  try {
+    res = await sendMessage({
+      type: 'SYNC_TAB_COLUMN_UNIQUES',
+      spreadsheetId,
+      tabId,
+      autoApplyEmptyDropdowns: true,
+      applyColumnIndex: columnIndex,
+      columnIndex,
+    });
+  } catch (err) {
+    res = { success: false, error: err.message };
+  }
   btn.disabled = false;
   if (!res?.success) {
     showStatus(res?.error || 'Could not read this sheet column.', 'error');
@@ -1454,6 +1486,7 @@ async function onRemoveDropdownOption(e) {
   );
 }
 
+/** Move up/down or delete a column from the row's action buttons. */
 async function onColumnAction(e) {
   const btn = e.currentTarget;
   const action = btn.dataset.colAction;
@@ -1500,81 +1533,80 @@ async function onAddColumn(e) {
   });
 }
 
-async function handleUndo(entryId) {
-  if (!undoStack.length) return;
-  const btn = $('#undo-btn');
+// ---------------------------------------------------------------------------
+// Undo / redo / remove / status
+// ---------------------------------------------------------------------------
+
+/**
+ * Run an undo or redo round-trip and refresh the UI.
+ * @param {'undo'|'redo'} kind
+ * @param {string} [entryId] optional specific history entry
+ */
+async function runHistoryStep(kind, entryId) {
+  const isUndo = kind === 'undo';
+  if (!(isUndo ? undoStack : redoStack).length) return;
+  const btn = $(isUndo ? '#undo-btn' : '#redo-btn');
   btn.disabled = true;
-  btn.textContent = 'Undoing…';
+  btn.textContent = isUndo ? 'Undoing…' : 'Redoing…';
 
   try {
-    const res = await sendMessage({ type: 'UNDO_SCHEMA_CHANGE', entryId });
-    if (res.success) {
+    const res = await sendMessage({
+      type: isUndo ? 'UNDO_SCHEMA_CHANGE' : 'REDO_SCHEMA_CHANGE',
+      entryId,
+    });
+    if (res?.success) {
       sheets = res.sheets;
       undoStack = res.stack || [];
       redoStack = res.redoStack || [];
       renderSheetList();
-      renderUndoBar();
       showStatus(
-        `Undid: ${res.restored?.label || 'last change'}. Headers restored if needed.`,
+        `${isUndo ? 'Undid' : 'Redid'}: ${res.restored?.label || 'last change'}. Headers restored if needed.`,
         'success'
       );
     } else {
-      showStatus(res.error || 'Undo failed.', 'error');
-      renderUndoBar();
+      showStatus(res?.error || `${isUndo ? 'Undo' : 'Redo'} failed.`, 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
-    renderUndoBar();
+  } finally {
+    renderUndoBar(); // always resets button labels/disabled state
   }
 }
 
-async function handleRedo(entryId) {
-  if (!redoStack.length) return;
-  const btn = $('#redo-btn');
-  btn.disabled = true;
-  btn.textContent = 'Redoing…';
+const handleUndo = (entryId) => runHistoryStep('undo', entryId);
+const handleRedo = (entryId) => runHistoryStep('redo', entryId);
 
-  try {
-    const res = await sendMessage({ type: 'REDO_SCHEMA_CHANGE', entryId });
-    if (res.success) {
-      sheets = res.sheets;
-      undoStack = res.stack || [];
-      redoStack = res.redoStack || [];
-      renderSheetList();
-      renderUndoBar();
-      showStatus(
-        `Redid: ${res.restored?.label || 'last change'}. Headers restored if needed.`,
-        'success'
-      );
-    } else {
-      showStatus(res.error || 'Redo failed.', 'error');
-      renderUndoBar();
-    }
-  } catch (err) {
-    showStatus(err.message, 'error');
-    renderUndoBar();
-  }
-}
-
+/** Disconnect a spreadsheet from the extension (the Google Sheet itself is untouched). */
 async function handleRemoveSheet(spreadsheetId) {
-  if (!confirm('Remove this spreadsheet from Job Tracker?')) return;
+  const name = sheets.find((s) => s.spreadsheetId === spreadsheetId)?.name || 'this spreadsheet';
+  if (!confirm(`Remove “${name}” from Job Tracker?\n\nThe Google Sheet itself is not deleted.`)) return;
 
-  const res = await sendMessage({ type: 'REMOVE_SHEET', spreadsheetId });
-  if (res.success) {
-    sheets = res.sheets;
-    renderSheetList();
-    showStatus('Sheet removed.', 'success');
+  try {
+    const res = await sendMessage({ type: 'REMOVE_SHEET', spreadsheetId });
+    if (res?.success) {
+      sheets = res.sheets;
+      renderSheetList();
+      showStatus(`Removed “${name}”. The Google Sheet was not changed.`, 'success');
+    } else {
+      showStatus(res?.error || 'Could not remove the sheet.', 'error');
+    }
+  } catch (err) {
+    showStatus(err.message || 'Could not remove the sheet.', 'error');
   }
 }
 
+/** Show a transient banner; a newer message replaces (and re-times) an older one. */
 function showStatus(msg, type) {
   const el = $('#status');
   el.textContent = msg;
   el.className = `status status-${type}`;
   el.classList.remove('hidden');
-  setTimeout(() => el.classList.add('hidden'), 4500);
+  clearTimeout(statusTimer);
+  // Errors stay longer so they can be read.
+  statusTimer = setTimeout(() => el.classList.add('hidden'), type === 'error' ? 8000 : 4500);
 }
 
+/** Promise wrapper around chrome.runtime.sendMessage; rejects on runtime errors. */
 function sendMessage(msg) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (res) => {
@@ -1588,6 +1620,7 @@ function sendMessage(msg) {
   });
 }
 
+/** Escape text for safe use in innerHTML templates and attribute values. */
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)

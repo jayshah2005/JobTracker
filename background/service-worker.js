@@ -1,5 +1,8 @@
 /**
  * Background service worker entry — message router only.
+ * UI pages and content scripts call chrome.runtime.sendMessage({ type, ... });
+ * each handler resolves to `{ success, ... }` and failures become
+ * `{ success: false, error }` so the UI never sees an unhandled rejection.
  * Auth → ./google-session.js · Sheets → ./sheets-orchestrator.js ·
  * Side panel → ./side-panel.js · Page extract → ./page-job-data.js
  */
@@ -49,13 +52,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sidePanelResult !== null) return sidePanelResult;
 
   handleMessage(message, sender).then(sendResponse).catch((err) => {
-    sendResponse({ success: false, error: err.message });
+    console.error('Message failed:', message?.type, err);
+    sendResponse({
+      success: false,
+      error: err?.message || 'Something went wrong. Please try again.',
+    });
   });
+  // Keep the message channel open for the async response.
   return true;
 });
 
 async function handleMessage(message, sender) {
-  switch (message.type) {
+  switch (message?.type) {
     case 'GET_AUTH_STATUS':
       return getAuthStatus();
     case 'SAVE_OAUTH_CLIENT':
@@ -114,6 +122,6 @@ async function handleMessage(message, sender) {
         redoStack: await getRedoStack(),
       };
     default:
-      return { success: false, error: 'Unknown message type' };
+      return { success: false, error: 'Unknown request. Reload the extension and try again.' };
   }
 }

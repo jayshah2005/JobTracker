@@ -224,3 +224,19 @@ describe('ATS pipelines', () => {
     ).toBe(true);
   });
 });
+
+describe('regressions', () => {
+  test('host matching does not accept look-alike domains', () => {
+    expect(detectAts('https://notlinkedin.com/jobs/view/123').ats).toBe('general');
+    expect(detectAts('https://www.linkedin.com/jobs/view/123').ats).toBe('linkedin');
+  });
+
+  test('Lever keeps company names that merely contain "lever"', () => {
+    const doc = parseHtml(
+      `<div class="main-header-logo"><img alt="Clever Labs logo"></div>
+       <div class="posting-headline"><h2>Engineer</h2></div>`,
+      'https://jobs.lever.co/clever/abc-123'
+    );
+    expect(extractJobData(doc, 'https://jobs.lever.co/clever/abc-123').company).toBe('Clever Labs');
+  });
+});

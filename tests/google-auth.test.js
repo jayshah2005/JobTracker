@@ -216,3 +216,28 @@ describe('token HTTP helpers', () => {
     expect(token.refreshToken).toBe('1//old');
   });
 });
+
+describe('sheetsAccessError (network/cancel/quota)', () => {
+  test('maps fetch failures to an offline hint', () => {
+    expect(sheetsAccessError('Failed to fetch')).toMatch(/internet connection/i);
+  });
+  test('maps a closed consent window to a cancel message', () => {
+    expect(sheetsAccessError('The user did not approve access.')).toMatch(/cancelled/i);
+  });
+  test('maps rate limiting', () => {
+    expect(sheetsAccessError('Google Sheets API error: 429')).toMatch(/limiting/i);
+  });
+});
+
+describe('token endpoint errors', () => {
+  test('refreshAccessToken error exposes Google error code and status', async () => {
+    const fetchImpl = async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'invalid_grant', error_description: 'Token revoked' }),
+    });
+    await expect(
+      refreshAccessToken({ clientId: 'x', refreshToken: 'r' }, fetchImpl)
+    ).rejects.toMatchObject({ code: 'invalid_grant', status: 400 });
+  });
+});
