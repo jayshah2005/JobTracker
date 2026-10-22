@@ -19,7 +19,14 @@ import {
   isDestructiveOp,
 } from '../lib/schema-editor.js';
 import { normalizeDropdownOptions, normalizeDropdownDefault } from '../lib/field-mapper.js';
-import { getSettings, saveSettings } from '../lib/storage.js';
+import {
+  getSettings,
+  saveSettings,
+  destinationKey,
+  resolveDefaultDestination,
+  clearDefaultDestinationForSheet,
+} from '../lib/storage.js';
+import { getAllDestinations } from '../lib/sheet-config.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -117,6 +124,7 @@ async function init() {
   $('#redo-btn').addEventListener('click', () => handleRedo());
   $('#auto-show').addEventListener('change', saveSettingsFromUI);
   $('#embed-role-link').addEventListener('change', saveSettingsFromUI);
+  $('#default-destination').addEventListener('change', saveDefaultDestination);
   $('#sign-in-btn').addEventListener('click', handleSignIn);
   $('#sign-out-btn').addEventListener('click', handleSignOut);
   $('#open-connect-btn')?.addEventListener('click', openConnectPage);
@@ -332,6 +340,52 @@ async function loadSettings() {
   const settings = await getSettings();
   $('#auto-show').checked = settings.autoShowPopup !== false;
   $('#embed-role-link').checked = settings.embedRoleHyperlink !== false;
+  await renderDefaultDestination();
+}
+
+/** Same label the side panel uses for a destination. */
+function destinationLabel(d) {
+  return `${d.sheetName || 'Spreadsheet'} → ${d.tabName || 'Sheet'}`;
+}
+
+/** Fill the Default sheet select from the current sheets; disabled with one destination. */
+async function renderDefaultDestination() {
+  const select = $('#default-destination');
+  const hint = $('#default-destination-hint');
+  const dests = getAllDestinations(sheets);
+  let saved = '';
+  try {
+    saved = (await getSettings()).defaultDestination || '';
+  } catch {
+    /* fall back to first destination */
+  }
+  const current = resolveDefaultDestination(dests, saved);
+  select.innerHTML = dests
+    .map((d) => {
+      const key = destinationKey(d);
+      return `<option value="${escapeHtml(key)}">${escapeHtml(destinationLabel(d))}</option>`;
+    })
+    .join('');
+  if (current) select.value = destinationKey(current);
+  select.disabled = dests.length <= 1;
+  hint.textContent =
+    dests.length === 0
+      ? 'Add a sheet to choose a default.'
+      : dests.length === 1
+        ? 'Only one sheet is connected, so it is used automatically.'
+        : 'Pre-selected in the side panel when you save a job';
+}
+
+async function saveDefaultDestination() {
+  const select = $('#default-destination');
+  const dest = getAllDestinations(sheets).find((d) => destinationKey(d) === select.value);
+  try {
+    await saveSettings({ defaultDestination: select.value });
+    showStatus(`Default sheet set to ${dest ? destinationLabel(dest) : 'selection'}.`, 'success');
+  } catch (err) {
+    showStatus(err.message || 'Could not save default sheet.', 'error');
+    await renderDefaultDestination();
+  }
 }
 
 async function loadUndoStack() {
@@ -453,6 +507,7 @@ function renderUndoBar() {
 /** Re-render the whole sheet workspace and rebind every control inside it. */
 function renderSheetList() {
   const container = $('#sheet-list');
+  renderDefaultDestination();
 
   if (sheets.length === 0) {
     activeSpreadsheetId = null;
@@ -1585,6 +1640,11 @@ async function handleRemoveSheet(spreadsheetId) {
     const res = await sendMessage({ type: 'REMOVE_SHEET', spreadsheetId });
     if (res?.success) {
       sheets = res.sheets;
+      try {
+        await clearDefaultDestinationForSheet(spreadsheetId);
+      } catch {
+        /* a stale default falls back to the first destination */
+      }
       renderSheetList();
       showStatus(`Removed “${name}”. The Google Sheet was not changed.`, 'success');
     } else {

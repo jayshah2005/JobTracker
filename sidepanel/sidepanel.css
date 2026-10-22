@@ -699,3 +699,48 @@ a:focus-visible {
     transform: rotate(360deg);
   }
 }
+
+/* Non-blocking "searching your sheets" hint shown above the save form. */
+.search-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--jt-muted);
+  margin-bottom: 10px;
+}
+
+/* "View entry" inside the editing banner (override full-width secondary). */
+.editing-banner .btn-secondary {
+  width: auto;
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* "Make default" toggle in the destination card header. */
+.btn-link-small {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jt-primary);
+  cursor: pointer;
+}
+
+.btn-link-small:hover:not(:disabled) {
+  background: var(--jt-primary-soft);
+}
+
+.btn-link-small[aria-pressed='true'] {
+  color: var(--jt-success);
+  cursor: default;
+}
+
+.btn-link-small:disabled {
+  cursor: default;
+  opacity: 0.7;
+}

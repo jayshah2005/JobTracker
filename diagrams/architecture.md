@@ -222,7 +222,7 @@ Default columns: Date Applied, Job ID, Company Name, Role, Location, Application
 flowchart TB
   subgraph local [chrome.storage.local]
     sheets[configuredSheets<br/>spreadsheet + tabs + mappings]
-    settings[settings<br/>autoShowPopup, embedRoleHyperlink]
+    settings[settings<br/>autoShowPopup, embedRoleHyperlink,<br/>defaultDestination = sheetId:gid]
     token[googleToken, oauthPkce<br/>oauthClientId, oauthClientSecret]
     undo[schemaUndoStack / schemaRedoStack]
   end

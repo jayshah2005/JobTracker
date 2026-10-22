@@ -549,12 +549,20 @@ export async function redoSchemaChange(entryId) {
 }
 
 /**
- * Load every tab of every connected sheet with raw rows, for duplicate checks.
- * Unreadable sheets/tabs are skipped so one bad sheet doesn't block the check.
+ * Yield every tab of every connected sheet with raw rows, one tab at a time,
+ * so callers can stop at the first hit. Unreadable sheets/tabs are skipped so
+ * one bad sheet doesn't block the check. `preferred` is a list of
+ * `${spreadsheetId}:${gid}` keys: those sheets, and those tabs within a
+ * sheet, are visited first.
  */
-async function loadAllTabsWithRows(token, sheets) {
-  const tabs = [];
-  for (const sheet of sheets) {
+async function* iterateTabsWithRows(token, sheets, preferred = []) {
+  const prefKeys = (preferred || []).map(String);
+  const prefSheets = new Set(prefKeys.map((k) => k.split(':')[0]));
+  const ordered = [
+    ...sheets.filter((s) => prefSheets.has(String(s.spreadsheetId))),
+    ...sheets.filter((s) => !prefSheets.has(String(s.spreadsheetId))),
+  ];
+  for (const sheet of ordered) {
     let metaSheets = [];
     try {
       const meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
@@ -562,6 +570,12 @@ async function loadAllTabsWithRows(token, sheets) {
     } catch {
       continue;
     }
+    const isPreferred = (entry) =>
+      prefKeys.includes(`${sheet.spreadsheetId}:${entry.properties.sheetId}`);
+    metaSheets = [
+      ...metaSheets.filter(isPreferred),
+      ...metaSheets.filter((e) => !isPreferred(e)),
+    ];
     for (const entry of metaSheets) {
       const props = entry.properties;
       const tabName = props.title;
@@ -576,29 +590,40 @@ async function loadAllTabsWithRows(token, sheets) {
       } catch {
         rows = [];
       }
-      tabs.push({
+      yield {
         sheetName: sheet.name,
         tabName,
         spreadsheetId: sheet.spreadsheetId,
         gid,
         mappings: configTab?.mappings,
         rows,
-      });
+      };
     }
   }
-  return tabs;
 }
 
-/** Look for an existing row for this job across all connected sheets. */
-export async function findApplication(extractedData = {}) {
+/**
+ * Look for an existing row for this job across all connected sheets.
+ * Stops at the first match. The match names the destination it was found in
+ * (spreadsheetId / gid / sheetName / tabName). `preferredDestinations`
+ * (`${spreadsheetId}:${gid}` keys, e.g. the selected and default sheet) are
+ * searched first so the common case returns without reading every tab.
+ */
+export async function findApplication(extractedData = {}, preferredDestinations = []) {
   const sheets = await getConfiguredSheets();
   if (!sheets.length) return { success: true, matched: false };
 
   try {
     return await withSheetAccess(async (token) => {
-      const tabs = await loadAllTabsWithRows(token, sheets);
-      const hit = findExistingApplication(tabs, extractedData);
-      return { success: true, ...hit };
+      for await (const tab of iterateTabsWithRows(
+        token,
+        sheets,
+        Array.isArray(preferredDestinations) ? preferredDestinations : []
+      )) {
+        const hit = findExistingApplication([tab], extractedData);
+        if (hit.matched) return { success: true, ...hit };
+      }
+      return { success: true, matched: false };
     });
   } catch (err) {
     return { success: false, matched: false, error: err.message };

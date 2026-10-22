@@ -94,9 +94,15 @@
       </div>
 
       <div id="save-view" class="sp-view hidden">
+        <div id="search-indicator" class="search-indicator hidden" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Checking your sheets for this job…</span>
+        </div>
+
         <div id="editing-banner" class="editing-banner hidden">
           <div class="editing-banner-title" id="editing-banner-title">Editing saved application</div>
           <p id="editing-banner-meta" class="field-hint"></p>
+          <button type="button" class="btn btn-secondary hidden" id="view-existing-btn">View entry</button>
         </div>
 
         <section class="job-card" id="job-card">
@@ -120,6 +126,7 @@
               </svg>
               Destination
             </span>
+            <button type="button" class="btn-link-small" id="make-default-btn" aria-pressed="false">Make default</button>
           </div>
           <div class="panel-card-body">
             <label class="sr-only" for="destination-picker-input">Save to</label>

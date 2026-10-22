@@ -161,3 +161,37 @@ describe('findDestination', () => {
     expect(findDestination(sheets, 'abc', '0')?.gid).toBe('0');
   });
 });
+
+import {
+  destinationKey,
+  findDestinationIndexByKey,
+  chooseInitialDestinationIndex,
+} from '../lib/sheet-config.js';
+
+describe('initial destination choice', () => {
+  const dests = [
+    { sheetId: 'A', gid: '1', tabId: 't1' },
+    { sheetId: 'A', gid: '2', tabId: 't2' },
+    { sheetId: 'B', gid: '3', tabId: 't3' },
+  ];
+  test('destinationKey', () => {
+    expect(destinationKey(dests[2])).toBe('B:3');
+    expect(destinationKey(null)).toBe('');
+  });
+  test('findDestinationIndexByKey accepts gid or tabId keys', () => {
+    expect(findDestinationIndexByKey(dests, 'B:3')).toBe(2);
+    expect(findDestinationIndexByKey(dests, 'A:t2')).toBe(1);
+    expect(findDestinationIndexByKey(dests, 'Z:9')).toBe(-1);
+    expect(findDestinationIndexByKey(dests, '')).toBe(-1);
+  });
+  test('draft beats default beats first', () => {
+    expect(chooseInitialDestinationIndex(dests, { draftKey: 'A:2', defaultKey: 'B:3' })).toBe(1);
+    expect(chooseInitialDestinationIndex(dests, { defaultKey: 'B:3' })).toBe(2);
+    expect(chooseInitialDestinationIndex(dests, {})).toBe(0);
+  });
+  test('stale draft/default keys fall through', () => {
+    expect(chooseInitialDestinationIndex(dests, { draftKey: 'X:1', defaultKey: 'B:3' })).toBe(2);
+    expect(chooseInitialDestinationIndex(dests, { draftKey: 'X:1', defaultKey: 'Y:1' })).toBe(0);
+    expect(chooseInitialDestinationIndex([], { defaultKey: 'B:3' })).toBe(0);
+  });
+});

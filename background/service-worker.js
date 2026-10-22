@@ -92,7 +92,7 @@ async function handleMessage(message, sender) {
     case 'DELETE_JOB':
       return deleteJob(message);
     case 'FIND_APPLICATION':
-      return findApplication(message.extractedData);
+      return findApplication(message.extractedData, message.preferredDestinations);
     case 'GET_TAB_JOB_DATA': {
       const tabId = message.tabId ?? sender.tab?.id;
       const data = await getTabJobData(tabId, message.url || sender.tab?.url || '');

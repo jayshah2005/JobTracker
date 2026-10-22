@@ -424,6 +424,12 @@ body {
   margin-top: 2px;
 }
 
+.setting-row select {
+  width: auto;
+  max-width: 55%;
+  margin-bottom: 0;
+}
+
 .setting-row input[type='checkbox'] {
   width: auto;
   margin-bottom: 0;

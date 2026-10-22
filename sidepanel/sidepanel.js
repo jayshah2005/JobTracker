@@ -9,6 +9,14 @@
  * ADD_SHEET, FIND_APPLICATION, SAVE_JOB, DELETE_JOB, APPLY_SCHEMA_CHANGE,
  * GET_TAB_JOB_DATA, SIGN_IN, CLOSE_SIDE_PANEL, SIDE_PANEL_UNLOADED).
  *
+ * Loading is staged so the form never waits on the sheet search: cached
+ * sheets paint the save form + destination picker first, a live
+ * REFRESH_SHEETS and FIND_APPLICATION then run in the background (guarded by
+ * loadToken so stale results are dropped). A found match auto-enters edit mode
+ * only if the user has not touched the form; otherwise a banner offers
+ * "View entry". The preselected destination is draft > default sheet
+ * (settings.defaultDestination) > first.
+ *
  * Sections: state / init / data loading / views / sign-in & setup /
  * destination picker / edit mode / job card & fields / dropdown comboboxes /
  * save & delete / helpers.
@@ -27,7 +35,11 @@ import {
   getAllDestinations,
   shouldShowDestinationPicker,
   findDestination,
+  destinationKey,
+  findDestinationIndexByKey,
+  chooseInitialDestinationIndex,
 } from '../lib/sheet-config.js';
+import { getSettings, saveSettings } from '../lib/storage.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -48,6 +60,12 @@ let editingRowIndex = null;
 let boundTabId = null;
 let boundTabUrl = '';
 let refreshTimer = null;
+/** Bumped on every loadData; background results from older loads are ignored. */
+let loadToken = 0;
+/** True once the user typed or changed destination for the current page. */
+let userInteracted = false;
+/** `${sheetId}:${gid}` of the user's default sheet ('' when unset). */
+let defaultDestinationKey = '';
 
 /** Session-storage key for the unsaved form draft of a given tab. */
 function draftKey(tabId) {
@@ -109,6 +127,10 @@ async function init() {
 
   $('#save-btn').addEventListener('click', handleSave);
   bindDestinationCombo();
+  $('#make-default-btn')?.addEventListener('click', handleMakeDefault);
+  $('#view-existing-btn')?.addEventListener('click', () => {
+    startEditingExisting().catch((err) => showStatus(err.message, 'error'));
+  });
   $('#edit-existing-btn')?.addEventListener('click', () => {
     startEditingExisting().catch((err) => showStatus(err.message, 'error'));
   });
@@ -207,8 +229,11 @@ async function loadData(opts = {}) {
 }
 
 async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
+  const token = ++loadToken;
   if (!quiet) showView('loading');
   existingMatch = null;
+  if (!restoreDraft) userInteracted = false;
+  setSearching(false);
 
   const [authRes, tab] = await Promise.all([
     sendMessage({ type: 'GET_AUTH_STATUS' }),
@@ -217,6 +242,7 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
       : getActiveTab(),
   ]);
 
+  if (token !== loadToken) return;
   if (tab?.id) boundTabId = tab.id;
   boundTabUrl = tab?.url || '';
 
@@ -237,13 +263,24 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
     return;
   }
 
-  // Full opens pull live sheet data so manual Google Sheet edits sync.
-  // Quiet tab navigations keep the cached config for snappy reloads.
-  let sheetsRes = quiet
-    ? await sendMessage({ type: 'GET_SHEETS' })
-    : await sendMessage({ type: 'REFRESH_SHEETS' });
-  if (!quiet && !sheetsRes?.success) {
-    sheetsRes = await sendMessage({ type: 'GET_SHEETS' });
+  // Paint from cached sheets (fast); full opens then pull live sheet data in
+  // the background so manual Google Sheet edits sync without blocking the form.
+  // Quiet tab navigations keep the cached config.
+  const [cachedRes, settings] = await Promise.all([
+    sendMessage({ type: 'GET_SHEETS' }),
+    getSettings().catch(() => ({})),
+  ]);
+  if (token !== loadToken) return;
+  defaultDestinationKey = settings?.defaultDestination || '';
+
+  let sheetsRes = cachedRes;
+  let refreshInBackground = !quiet;
+  if (!quiet && !(sheetsRes?.sheets || []).length) {
+    // Nothing cached: the live list is needed before we can show anything.
+    const live = await sendMessage({ type: 'REFRESH_SHEETS' });
+    if (token !== loadToken) return;
+    if (live?.success) sheetsRes = live;
+    refreshInBackground = false;
   }
 
   sheets = sheetsRes?.sheets || [];
@@ -260,16 +297,12 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
     Object.assign(previousInputs, draft.userInputs);
   }
 
-  extractedData = await getPageJobData(tab);
+  const pageData = await getPageJobData(tab);
+  if (token !== loadToken) return;
+  extractedData = pageData;
   if (!extractedData.url) {
     extractedData.url = tab?.url || '';
   }
-
-  const found = await sendMessage({
-    type: 'FIND_APPLICATION',
-    extractedData,
-  });
-  if (found?.matched && enterEditMode(found)) return;
 
   editingRowIndex = null;
   existingMatch = null;
@@ -279,7 +312,95 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
   renderEditChrome();
   renderDynamicFields({ preferExistingInputs: Boolean(Object.keys(previousInputs).length) });
   showView('save');
+
+  // Background work: neither blocks the form; both are dropped if a newer
+  // loadData started meanwhile.
+  runApplicationSearch(token);
+  if (refreshInBackground) refreshSheetsInBackground(token);
   await saveDraft();
+}
+
+/** Show/hide the non-blocking "Checking your sheets…" indicator. */
+function setSearching(on) {
+  $('#search-indicator')?.classList.toggle('hidden', !on);
+}
+
+function isSaveViewVisible() {
+  return !$('#save-view').classList.contains('hidden');
+}
+
+/**
+ * Look for this job in the background (once per page load; changing the
+ * destination picker never re-runs it). The selected and default destinations
+ * are searched first. On a match: enter edit mode if the user has not touched
+ * the form, otherwise just remember it so the banner offers "View entry".
+ */
+async function runApplicationSearch(token) {
+  setSearching(true);
+  const preferred = [
+    ...new Set(
+      [destinationKey(selectedDestination), defaultDestinationKey].filter(Boolean)
+    ),
+  ];
+  const found = await sendMessage({
+    type: 'FIND_APPLICATION',
+    extractedData: { ...extractedData },
+    preferredDestinations: preferred,
+  });
+  if (token !== loadToken) return;
+  setSearching(false);
+  if (!found?.matched) return;
+  // Already editing, or the form was replaced (saved/applied/error): ignore.
+  if (isEditingExisting() || !isSaveViewVisible()) return;
+  if (!userInteracted) {
+    enterEditMode(found);
+    return;
+  }
+  existingMatch = found;
+  renderEditChrome();
+}
+
+/**
+ * Pull live sheet config after the form is already showing, then fold it in
+ * without disturbing what the user is doing: the selection is kept (by key)
+ * and fields are only re-rendered when the selected tab's columns changed.
+ */
+async function refreshSheetsInBackground(token) {
+  const res = await sendMessage({ type: 'REFRESH_SHEETS' });
+  if (token !== loadToken || !res?.success || !Array.isArray(res.sheets)) return;
+  if (!isSaveViewVisible()) return;
+
+  const prevKey = destinationKey(selectedDestination);
+  const prevMappings = JSON.stringify(selectedDestination?.mappings || []);
+  sheets = res.sheets;
+  destinations = getAllDestinations(sheets);
+  if (sheets.length === 0) {
+    showView('setup');
+    return;
+  }
+  $('#destination-section').classList.toggle(
+    'hidden',
+    !shouldShowDestinationPicker(sheets)
+  );
+
+  const idx = findDestinationIndexByKey(destinations, prevKey);
+  if (idx < 0) {
+    // The selected tab disappeared: fall back to default/first.
+    onDestinationChange(
+      chooseInitialDestinationIndex(destinations, {
+        defaultKey: defaultDestinationKey,
+      }),
+      { fromUser: false }
+    );
+    return;
+  }
+  selectedDestination = destinations[idx];
+  applyPickerSelection(idx);
+  if (JSON.stringify(selectedDestination.mappings || []) !== prevMappings) {
+    collectFieldValues();
+    renderDynamicFields({ preferExistingInputs: true });
+  }
+  renderEditChrome();
 }
 
 /** Show exactly one top-level view: loading | error | signin | setup | save | applied. */
@@ -365,36 +486,75 @@ function destinationLabel(d) {
   return `${d.sheetName || 'Spreadsheet'} → ${d.tabName || 'Sheet'}`;
 }
 
+/** Reflect `idx` in the picker input and the "Make default" control. */
+function applyPickerSelection(idx) {
+  const input = $('#destination-picker-input');
+  const combo = $('#destination-combo');
+  const label = destinationLabel(selectedDestination);
+  if (input) {
+    input.value = label;
+    input.dataset.committed = label;
+    input.dataset.index = String(idx);
+  }
+  if (combo) combo.dataset.index = String(idx);
+  updateDefaultControl();
+}
+
+/** "Make default" / "Default ✓" state for the currently selected destination. */
+function updateDefaultControl() {
+  const btn = $('#make-default-btn');
+  if (!btn) return;
+  const key = destinationKey(selectedDestination);
+  const isDefault = Boolean(key) && key === defaultDestinationKey;
+  const label = destinationLabel(selectedDestination);
+  btn.textContent = isDefault ? 'Default ✓' : 'Make default';
+  btn.setAttribute('aria-pressed', isDefault ? 'true' : 'false');
+  btn.setAttribute('aria-disabled', isDefault ? 'true' : 'false');
+  btn.setAttribute(
+    'aria-label',
+    isDefault
+      ? `${label} is your default sheet`
+      : `Make ${label} your default sheet`
+  );
+}
+
+async function handleMakeDefault() {
+  const dest = selectedDestination;
+  const key = destinationKey(dest);
+  if (!key || key === defaultDestinationKey) return;
+  const btn = $('#make-default-btn');
+  btn.disabled = true;
+  try {
+    await saveSettings({ defaultDestination: key });
+    defaultDestinationKey = key;
+    showStatus(`${destinationLabel(dest)} is now your default sheet.`, 'success');
+  } catch (err) {
+    showStatus(
+      `Could not save your default sheet${err?.message ? `: ${err.message}` : '.'}`,
+      'error'
+    );
+  } finally {
+    btn.disabled = false;
+    updateDefaultControl();
+  }
+}
+
+/** Preselect: draft destination, then the default sheet, then the first. */
 function setupDestinationPicker(preferredKey = null) {
   const section = $('#destination-section');
   const combo = $('#destination-combo');
-  const input = $('#destination-picker-input');
 
-  let idx = 0;
-  if (preferredKey) {
-    const found = destinations.findIndex((d) => {
-      const gidKey = `${d.sheetId}:${d.gid}`;
-      const tabKey = `${d.sheetId}:${d.tabId}`;
-      return gidKey === preferredKey || tabKey === preferredKey;
-    });
-    if (found >= 0) idx = found;
-  }
-
+  const idx = chooseInitialDestinationIndex(destinations, {
+    draftKey: preferredKey || '',
+    defaultKey: defaultDestinationKey,
+  });
   selectedDestination = destinations[idx] || destinations[0] || null;
 
   // Still honor preferred destination when the picker is hidden (single tab).
   section.classList.toggle('hidden', !shouldShowDestinationPicker(sheets));
 
-  if (input) {
-    const label = destinationLabel(selectedDestination);
-    input.value = label;
-    input.dataset.committed = label;
-    input.dataset.index = String(idx);
-  }
-  if (combo) {
-    combo.dataset.index = String(idx);
-    combo.classList.toggle('is-disabled', false);
-  }
+  applyPickerSelection(idx);
+  if (combo) combo.classList.toggle('is-disabled', false);
 }
 
 /** True when a FIND_APPLICATION match lives in the given destination tab. */
@@ -409,19 +569,12 @@ function destinationMatches(match, dest) {
   );
 }
 
-function onDestinationChange(idx) {
+function onDestinationChange(idx, { fromUser = true } = {}) {
   const next = destinations[idx];
   if (!next) return;
+  if (fromUser) userInteracted = true;
   selectedDestination = next;
-  const input = $('#destination-picker-input');
-  const combo = $('#destination-combo');
-  const label = destinationLabel(next);
-  if (input) {
-    input.value = label;
-    input.dataset.committed = label;
-    input.dataset.index = String(idx);
-  }
-  if (combo) combo.dataset.index = String(idx);
+  applyPickerSelection(idx);
 
   // Same job in another sheet: switching destination leaves edit mode so Save
   // appends a new row. Switching back to the matched tab restores Update.
@@ -648,6 +801,7 @@ function renderEditChrome() {
   // sheet can still be added to another.
   const lockDestination = editing && !multiDest;
   const banner = $('#editing-banner');
+  const viewBtn = $('#view-existing-btn');
   const lockedHint = $('#destination-locked-hint');
   const combo = $('#destination-combo');
   const input = $('#destination-picker-input');
@@ -659,7 +813,16 @@ function renderEditChrome() {
     selectedDestination &&
     !destinationMatches(existingMatch, selectedDestination);
 
-  banner?.classList.toggle('hidden', !editing && !elsewhere);
+  // A match found while the user was already filling the form (or in the
+  // selected tab) is surfaced here instead of hijacking the form.
+  const savedHere =
+    !editing &&
+    existingMatch?.matched &&
+    selectedDestination &&
+    destinationMatches(existingMatch, selectedDestination);
+
+  banner?.classList.toggle('hidden', !editing && !elsewhere && !savedHere);
+  viewBtn?.classList.toggle('hidden', editing || !(elsewhere || savedHere));
   lockedHint?.classList.toggle('hidden', !lockDestination);
   if (combo) combo.classList.toggle('is-disabled', lockDestination);
   if (input) {
@@ -681,13 +844,14 @@ function renderEditChrome() {
     $('#editing-banner-title').textContent = 'Editing saved application';
     $('#editing-banner-meta').textContent =
       `Update any field (status, notes, etc.)${status}${when}${where}.${switchHint}`;
-  } else if (elsewhere) {
+  } else if (elsewhere || savedHere) {
     const where = existingMatch.tabName
       ? `${existingMatch.sheetName ? `${existingMatch.sheetName} → ` : ''}${existingMatch.tabName}`
       : 'another sheet';
-    $('#editing-banner-title').textContent = 'Already in another sheet';
-    $('#editing-banner-meta').textContent =
-      `Saved in ${where}. Saving here will add a separate copy to this destination.`;
+    $('#editing-banner-title').textContent = `This job is already saved in ${where}`;
+    $('#editing-banner-meta').textContent = elsewhere
+      ? 'Saving here will add a separate copy to this destination.'
+      : 'Open the entry to update it.';
   }
 
   if (label) {
@@ -1268,6 +1432,7 @@ function setUserInputForField(tag, columnIndex, type, value) {
 }
 
 function onFieldChange(e) {
+  userInteracted = true;
   const el = e.target;
   setUserInputForField(el.dataset.tag, el.dataset.col, el.dataset.type, el.value);
   saveDraft();
