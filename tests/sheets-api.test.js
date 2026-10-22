@@ -9,6 +9,9 @@ import {
   setRowsBold,
   loadSpreadsheetTabs,
   loadTabRows,
+  deleteColumn,
+  moveColumn,
+  insertColumn,
   ROW_CHUNK_SIZE,
 } from '../lib/sheets-api.js';
 
@@ -306,6 +309,57 @@ describe('sheets-api', () => {
         .fn()
         .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) });
       await expect(loadTabRows('id', 'Jobs', 't')).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  const okFetch = (body = {}) =>
+    (global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => body }));
+  const sentRequests = () => JSON.parse(global.fetch.mock.calls[0][1].body).requests;
+
+  test('deleteColumn sends a COLUMNS deleteDimension', async () => {
+    okFetch();
+    await deleteColumn('sid', '77', 2, 'tok');
+    expect(global.fetch.mock.calls[0][0]).toContain('sid:batchUpdate');
+    expect(sentRequests()).toEqual([
+      { deleteDimension: { range: { sheetId: 77, dimension: 'COLUMNS', startIndex: 2, endIndex: 3 } } },
+    ]);
+  });
+
+  test('deleteColumn rejects bad ids/indexes without calling the API', async () => {
+    okFetch();
+    await expect(deleteColumn('sid', 'abc', 0, 't')).rejects.toThrow(/tab id/);
+    await expect(deleteColumn('sid', '1', -1, 't')).rejects.toThrow(/column/);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('moveColumn uses pre-move destinationIndex', async () => {
+    okFetch();
+    await moveColumn('sid', 5, 0, 2, 'tok'); // right: lands at index 2
+    expect(sentRequests()[0].moveDimension).toEqual({
+      source: { sheetId: 5, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
+      destinationIndex: 3,
+    });
+    okFetch();
+    await moveColumn('sid', 5, 2, 0, 'tok'); // left
+    expect(sentRequests()[0].moveDimension.destinationIndex).toBe(0);
+  });
+
+  test('insertColumn inserts inside the grid and appends past it', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ sheets: [{ properties: { sheetId: 9, gridProperties: { columnCount: 5 } } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    await insertColumn('sid', 9, 1, 'tok');
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).requests[0].insertDimension.range).toEqual({
+      sheetId: 9, dimension: 'COLUMNS', startIndex: 1, endIndex: 2,
+    });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ sheets: [{ properties: { sheetId: 9, gridProperties: { columnCount: 2 } } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    await insertColumn('sid', 9, 4, 'tok');
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).requests[0].appendDimension).toEqual({
+      sheetId: 9, dimension: 'COLUMNS', length: 3,
     });
   });
 });

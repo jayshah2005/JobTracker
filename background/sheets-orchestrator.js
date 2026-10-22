@@ -21,6 +21,10 @@ import {
   fetchSpreadsheetMetadata,
   syncTabHeaders,
   seedTabHeaders,
+  deleteColumn,
+  moveColumn,
+  insertColumn,
+  getSheetColumnCount,
   renameSheetTab,
   rowIndexFromUpdatedRange,
 } from '../lib/sheets-api.js';
@@ -55,6 +59,7 @@ import {
   pushRedo,
   popRedo,
   describeChange,
+  planHistoryStep,
   isDestructiveOp,
   DESTRUCTIVE_WARNING,
   SCHEMA_OPS,
@@ -257,6 +262,43 @@ export async function refreshAllSheets() {
 }
 
 /**
+ * Perform a real column operation in Google Sheets (delete / move / insert)
+ * or a header rewrite. Callers run this BEFORE changing local config so a
+ * failure leaves nothing half-applied.
+ * `plan` is { kind, columnIndex?, fromIndex?, toIndex? }; `headers` are the
+ * headers the tab should have afterwards (used for 'insert' and 'headers').
+ */
+async function runSheetPlan(spreadsheetId, tab, plan, headers, token) {
+  const sheetId = tab.sheetId ?? tab.gid;
+  switch (plan.kind) {
+    case 'delete': {
+      const width = await getSheetColumnCount(spreadsheetId, sheetId, token);
+      if (plan.columnIndex >= width) return; // column never existed in the grid
+      if (width <= 1) {
+        throw new Error('Google Sheets needs at least one column in a tab.');
+      }
+      await deleteColumn(spreadsheetId, sheetId, plan.columnIndex, token);
+      return;
+    }
+    case 'move': {
+      const width = await getSheetColumnCount(spreadsheetId, sheetId, token);
+      if (Math.max(plan.fromIndex, plan.toIndex) >= width) {
+        throw new Error('That column is outside the sheet’s current width.');
+      }
+      await moveColumn(spreadsheetId, sheetId, plan.fromIndex, plan.toIndex, token);
+      return;
+    }
+    case 'insert':
+      await insertColumn(spreadsheetId, sheetId, plan.columnIndex, token);
+      await syncTabHeaders(spreadsheetId, tab.tabName, headers, token);
+      return;
+    case 'headers':
+      await syncTabHeaders(spreadsheetId, tab.tabName, headers, token);
+      return;
+  }
+}
+
+/**
  * Apply one column edit (rename/add/delete/move/tag/dropdown) to a tab, write
  * headers to Google when the change is structural, and record an undo entry.
  * Destructive ops require `confirmed: true` (otherwise `needsConfirmation`).
@@ -288,7 +330,35 @@ export async function applySchemaChangeMessage(message) {
   }
 
   const before = snapshotTabSchema(tab);
-  const result = applySchemaChange(tab.headers || [], tab.mappings || [], change);
+  let result;
+  try {
+    result = applySchemaChange(tab.headers || [], tab.mappings || [], change);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+
+  // Touch Google Sheets first; if it fails, nothing local has changed.
+  let plan = { kind: 'none' };
+  if (change.op === SCHEMA_OPS.DELETE) {
+    plan = { kind: 'delete', columnIndex: change.columnIndex };
+  } else if (change.op === SCHEMA_OPS.MOVE) {
+    plan = { kind: 'move', fromIndex: change.fromIndex, toIndex: change.toIndex };
+  } else if (result.syncHeaders) {
+    plan = { kind: 'headers' };
+  }
+  const touchesSheet = plan.kind !== 'none' && !skipSync && !tab.isNew;
+  if (touchesSheet) {
+    try {
+      await withSheetAccess((token) =>
+        runSheetPlan(spreadsheetId, tab, plan, result.headers, token)
+      );
+    } catch (err) {
+      return {
+        success: false,
+        error: `Google Sheets did not accept the change, so nothing was changed. ${err.message}`,
+      };
+    }
+  }
 
   tab.headers = result.headers;
   tab.mappings = result.mappings;
@@ -314,12 +384,6 @@ export async function applySchemaChangeMessage(message) {
     }
   }
 
-  if (result.syncHeaders && !skipSync && !tab.isNew) {
-    await withSheetAccess(async (token) => {
-      await syncTabHeaders(spreadsheetId, tab.tabName, tab.headers, token);
-    });
-  }
-
   const after = snapshotTabSchema(tab);
   const entry = createUndoEntry({
     spreadsheetId,
@@ -328,7 +392,11 @@ export async function applySchemaChangeMessage(message) {
     before,
     after,
     change,
-    label: describeChange(change),
+    label: describeChange(
+      change.op === SCHEMA_OPS.DELETE
+        ? { ...change, header: before.headers[change.columnIndex] }
+        : change
+    ),
   });
 
   const stack = pushUndo(await getUndoStack(), entry);
@@ -343,7 +411,7 @@ export async function applySchemaChangeMessage(message) {
     undoEntry: entry,
     stack,
     redoStack: [],
-    syncedHeaders: result.syncHeaders && !tab.isNew && !skipSync,
+    syncedHeaders: touchesSheet,
   };
 }
 
@@ -470,13 +538,23 @@ export async function undoSchemaChange(entryId) {
     return { success: false, error: 'Tab no longer available.' };
   }
 
-  restoreTabSchema(tab, entry.before);
-
-  if (entry.destructive && !tab.isNew) {
-    await withSheetAccess(async (token) => {
-      await syncTabHeaders(entry.spreadsheetId, tab.tabName, tab.headers, token);
-    });
+  const target = structuredClone(tab);
+  restoreTabSchema(target, entry.before);
+  const plan = planHistoryStep(entry, 'undo');
+  if (plan.kind !== 'none' && !tab.isNew) {
+    try {
+      await withSheetAccess((token) =>
+        runSheetPlan(entry.spreadsheetId, target, plan, target.headers, token)
+      );
+    } catch (err) {
+      // Nothing was saved yet: the entry stays on its stack, config is unchanged.
+      return {
+        success: false,
+        error: `Google Sheets did not accept the change, so nothing was changed. ${err.message}`,
+      };
+    }
   }
+  restoreTabSchema(tab, entry.before);
 
   const redoStack = pushRedo(await getRedoStack(), entry);
   await saveUndoStack(nextStack);
@@ -489,6 +567,7 @@ export async function undoSchemaChange(entryId) {
     stack: nextStack,
     redoStack,
     restored: entry,
+    note: plan.kind === 'insert' ? 'The column is back but empty; its old data cannot be restored.' : '',
   };
 }
 
@@ -526,13 +605,23 @@ export async function redoSchemaChange(entryId) {
     return { success: false, error: 'Tab no longer available.' };
   }
 
-  restoreTabSchema(tab, entry.after);
-
-  if (entry.destructive && !tab.isNew) {
-    await withSheetAccess(async (token) => {
-      await syncTabHeaders(entry.spreadsheetId, tab.tabName, tab.headers, token);
-    });
+  const target = structuredClone(tab);
+  restoreTabSchema(target, entry.after);
+  const plan = planHistoryStep(entry, 'redo');
+  if (plan.kind !== 'none' && !tab.isNew) {
+    try {
+      await withSheetAccess((token) =>
+        runSheetPlan(entry.spreadsheetId, target, plan, target.headers, token)
+      );
+    } catch (err) {
+      // Nothing was saved yet: the entry stays on its stack, config is unchanged.
+      return {
+        success: false,
+        error: `Google Sheets did not accept the change, so nothing was changed. ${err.message}`,
+      };
+    }
   }
+  restoreTabSchema(tab, entry.after);
 
   const undoStack = pushUndo(await getUndoStack(), entry);
   await saveUndoStack(undoStack);
@@ -545,6 +634,7 @@ export async function redoSchemaChange(entryId) {
     stack: undoStack,
     redoStack: nextRedo,
     restored: entry,
+    note: plan.kind === 'delete' ? 'The column and its data were deleted again.' : '',
   };
 }
 

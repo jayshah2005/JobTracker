@@ -10,6 +10,8 @@ import {
   createUndoEntry,
   isDestructiveOp,
   DESTRUCTIVE_WARNING,
+  planHistoryStep,
+  describeChange,
 } from '../lib/schema-editor.js';
 import { FIELD_TAGS } from '../lib/constants.js';
 import { buildDefaultMappings } from '../lib/field-mapper.js';
@@ -22,8 +24,8 @@ describe('schema-editor', () => {
     { columnIndex: 2, header: 'Notes', tag: FIELD_TAGS.CUSTOM_TEXTBOX, dropdownOptions: [] },
   ];
 
-  test('rename is destructive and updates header', () => {
-    expect(isDestructiveOp(SCHEMA_OPS.RENAME)).toBe(true);
+  test('rename only rewrites header text and needs no warning', () => {
+    expect(isDestructiveOp(SCHEMA_OPS.RENAME)).toBe(false);
     const result = applySchemaChange(headers, mappings, {
       op: SCHEMA_OPS.RENAME,
       columnIndex: 0,
@@ -103,6 +105,8 @@ describe('schema-editor', () => {
     expect(result.headers).toEqual(['Company', 'Notes']);
     expect(result.mappings.map((m) => m.columnIndex)).toEqual([0, 1]);
     expect(result.mappings[1].header).toBe('Notes');
+    expect(result.syncHeaders).toBe(false); // real column delete, no header rewrite
+    expect(isDestructiveOp(SCHEMA_OPS.DELETE)).toBe(true);
   });
 
   test('cannot delete last column', () => {
@@ -123,6 +127,8 @@ describe('schema-editor', () => {
     expect(result.headers).toEqual(['Role', 'Notes', 'Company']);
     expect(result.mappings.map((m) => m.header)).toEqual(['Role', 'Notes', 'Company']);
     expect(result.mappings.map((m) => m.columnIndex)).toEqual([0, 1, 2]);
+    expect(result.syncHeaders).toBe(false); // moveDimension carries the data
+    expect(isDestructiveOp(SCHEMA_OPS.MOVE)).toBe(false);
   });
 
   test('snapshot and restore round-trip', () => {
@@ -154,7 +160,7 @@ describe('schema-editor', () => {
       change: { op: SCHEMA_OPS.RENAME, columnIndex: 0, newHeader: 'Employer' },
       label: 'Rename',
     });
-    expect(entry.destructive).toBe(true);
+    expect(entry.destructive).toBe(false);
     stack = pushUndo(stack, entry);
     expect(stack).toHaveLength(1);
     const { stack: next, entry: popped } = popUndo(stack);
@@ -196,7 +202,7 @@ describe('schema-editor', () => {
   });
 
   test('destructive warning is present', () => {
-    expect(DESTRUCTIVE_WARNING.toLowerCase()).toContain('existing');
+    expect(DESTRUCTIVE_WARNING.toLowerCase()).toContain('rows');
   });
 });
 
@@ -212,5 +218,22 @@ describe('hide column (retag to Ignore)', () => {
     expect(r.syncHeaders).toBe(false);
     expect(r.mappings[1].tag).toBe(FIELD_TAGS.IGNORE);
     expect(isDestructiveOp(SCHEMA_OPS.CHANGE_TAG)).toBe(false);
+  });
+
+  test('planHistoryStep maps delete/move to real column ops', () => {
+    const del = { realColumnOps: true, change: { op: SCHEMA_OPS.DELETE, columnIndex: 1 } };
+    expect(planHistoryStep(del, 'undo')).toEqual({ kind: 'insert', columnIndex: 1 });
+    expect(planHistoryStep(del, 'redo')).toEqual({ kind: 'delete', columnIndex: 1 });
+    const mv = { realColumnOps: true, change: { op: SCHEMA_OPS.MOVE, fromIndex: 0, toIndex: 2 } };
+    expect(planHistoryStep(mv, 'undo')).toEqual({ kind: 'move', fromIndex: 2, toIndex: 0 });
+    expect(planHistoryStep(mv, 'redo')).toEqual({ kind: 'move', fromIndex: 0, toIndex: 2 });
+    expect(planHistoryStep({ realColumnOps: true, change: { op: SCHEMA_OPS.RENAME } }, 'undo').kind).toBe('headers');
+    expect(planHistoryStep({ realColumnOps: true, change: { op: SCHEMA_OPS.CHANGE_TAG } }, 'undo').kind).toBe('none');
+    // legacy entries only rewrote headers
+    expect(planHistoryStep({ destructive: true, change: { op: SCHEMA_OPS.DELETE } }, 'undo').kind).toBe('headers');
+  });
+
+  test('describeChange names the deleted column', () => {
+    expect(describeChange({ op: SCHEMA_OPS.DELETE, columnIndex: 1, header: 'Role' })).toContain('Role');
   });
 });

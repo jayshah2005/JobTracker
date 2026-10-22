@@ -1602,7 +1602,7 @@ async function handleDeleteExisting() {
   const label = company ? `${role} at ${company}` : role;
   const confirmed = await confirmDialog({
     title: 'Delete this application?',
-    message: `This deletes the row for “${label}” from your Google Sheet. Job Tracker cannot undo this, although you may be able to restore it from the sheet’s version history in Google Sheets.\n\nIf you cancel, the row stays where it is.`,
+    message: `Removes “${label}” from your Google Sheet. This cannot be undone here; try the sheet’s version history.`,
     confirmLabel: 'Delete row',
     danger: true,
   });

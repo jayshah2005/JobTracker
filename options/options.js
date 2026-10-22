@@ -1022,7 +1022,7 @@ function renderTabMappings(sheet, tab) {
       <p class="field-hint schema-hint">
         Edit column names and types below. Use Custom Text for a single line,
         Custom Textbox for multi-line notes, or Custom Dropdown for choices.
-        Structural edits warn first and can be undone.
+        Deleting a column removes it from the sheet; other edits can be undone.
       </p>
       <table class="mapping-table">
         <thead>
@@ -1303,24 +1303,16 @@ function bindDefaultComboboxes(container) {
  * @returns {Promise<object|null>} the response, or null if cancelled/failed
  */
 async function applyChange(spreadsheetId, tabId, change) {
-  const destructive = isDestructiveOp(change.op);
-
-  const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
-  const tab = sheet?.tabs?.find((t) => t.gid === tabId);
-  const willSyncNow = destructive && tab && !tab.isNew;
-
-  if (destructive) {
-    const extra = willSyncNow
-      ? 'Job Tracker will update the header row in your Google Sheet right away.'
-      : 'The headers will be written to your Google Sheet when this new tab is set up.';
+  // Delete has its own dialog; only REPLACE_ALL-style rewrites ask here.
+  if (isDestructiveOp(change.op) && change.op !== SCHEMA_OPS.DELETE) {
     const ok = await confirmDialog({
-      title: 'Change your sheet columns?',
-      message: `${DESTRUCTIVE_WARNING}\n\n${extra}\n\nIf you cancel, nothing is changed.`,
-      confirmLabel: willSyncNow ? 'Rewrite header' : 'Apply change',
+      title: 'Rewrite header row?',
+      message: DESTRUCTIVE_WARNING,
+      confirmLabel: 'Rewrite',
       danger: true,
     });
     if (!ok) {
-      renderSheetList(); // revert any optimistic UI (e.g. picked field type)
+      renderSheetList();
       return null;
     }
   }
@@ -1356,9 +1348,11 @@ async function applyChange(spreadsheetId, tabId, change) {
   renderSheetList();
   renderUndoBar();
   showStatus(
-    res.syncedHeaders
-      ? 'Columns updated in Google Sheets. Use Undo if this was a mistake.'
-      : 'Column settings saved. Use Undo if this was a mistake.',
+    change.op === SCHEMA_OPS.DELETE
+      ? 'Column deleted from your sheet.'
+      : res.syncedHeaders
+        ? 'Updated in Google Sheets. You can undo this.'
+        : 'Saved. You can undo this.',
     'success'
   );
   return res;
@@ -1562,11 +1556,11 @@ async function onColumnAction(e) {
     const choice = await choiceDialog({
       title: `Remove “${name}”?`,
       message:
-        'Still want this column in your sheet, just not filled in by Job Tracker? Hide it from the form instead. The column and its data stay in Google Sheets, and new rows simply leave it blank.' +
-        '\n\nOr delete the column from the sheet header. Data already in that column may no longer line up, but you can undo this from Settings.',
+        'Hide: keeps the column and its data in your sheet; new rows leave it blank.\n' +
+        'Delete: removes it and its data from your Google Sheet. Undo restores only the empty column.',
       choices: [
         { value: 'hide', label: 'Hide from the form', variant: 'primary' },
-        { value: 'delete', label: 'Delete column', variant: 'danger' },
+        { value: 'delete', label: 'Delete column and its data', variant: 'danger' },
       ],
       defaultChoice: 'hide',
     });
@@ -1580,6 +1574,7 @@ async function onColumnAction(e) {
       await applyChange(spreadsheetId, tabId, {
         op: SCHEMA_OPS.DELETE,
         columnIndex,
+        header: name,
       });
     }
     return;
@@ -1608,7 +1603,7 @@ async function onAddColumn(e) {
   const trimmed = await promptDialog({
     title: 'Add a column',
     message:
-      'The new column is added to the end of the header row in your Google Sheet. You can undo this from Settings. If you cancel, nothing is changed.',
+      'It is added after your last column.',
     label: 'Column name',
     defaultValue: 'Notes',
     confirmLabel: 'Add column',
@@ -1653,7 +1648,7 @@ async function runHistoryStep(kind, entryId) {
       redoStack = res.redoStack || [];
       renderSheetList();
       showStatus(
-        `${isUndo ? 'Undid' : 'Redid'}: ${res.restored?.label || 'last change'}. Headers restored if needed.`,
+        `${isUndo ? 'Undid' : 'Redid'}: ${res.restored?.label || 'last change'}.${res.note ? ` ${res.note}` : ''}`,
         'success'
       );
     } else {
@@ -1675,7 +1670,7 @@ async function handleRemoveSheet(spreadsheetId) {
   const ok = await confirmDialog({
     title: `Disconnect “${name}”?`,
     message:
-      'Job Tracker will stop saving to this spreadsheet and forget its column settings. The Google Sheet and everything in it stay exactly as they are. You can add it again later by pasting its link.\n\nIf you cancel, nothing changes.',
+      'Your Google Sheet is not changed. You can re-add it later with its link.',
     confirmLabel: 'Disconnect sheet',
     danger: true,
   });
