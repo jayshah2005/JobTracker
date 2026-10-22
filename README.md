@@ -114,7 +114,3 @@ Upload `dist/job-tracker-<version>.zip` in the
 
 Load unpacked still uses this repo folder (with the local `"key"` in
 `manifest.json`). The pack script strips that key for the store ZIP only, and injects the OAuth client into the staged copy of `lib/oauth-config.js` (never into your working tree).
-
-## License
-
-MIT

@@ -1,6 +1,6 @@
 {
   "name": "job-tracker-extension",
-  "version": "1.6.0",
+  "version": "1.0.0",
   "description": "Browser extension to track job applications in Google Sheets",
   "type": "module",
   "scripts": {

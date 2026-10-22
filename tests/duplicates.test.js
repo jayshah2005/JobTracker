@@ -204,3 +204,51 @@ describe('extractJobId robustness', () => {
     expect(extractJobId('https://example.com/%E0%A4%A/jobs/987654')).toBe('987654');
   });
 });
+
+describe('URL / id normalisation edge cases', () => {
+  test('LinkedIn slugged, bare-id and currentJobId URLs match', () => {
+    const a = 'https://www.linkedin.com/jobs/view/senior-engineer-at-acme-3812345678?trackingId=x&refId=y';
+    expect(urlsMatch(a, 'https://linkedin.com/jobs/view/3812345678/')).toBe(true);
+    expect(
+      urlsMatch(a, 'https://www.linkedin.com/jobs/collections/recommended/?currentJobId=3812345678')
+    ).toBe(true);
+  });
+
+  test('Workday ignores source param and /apply is the same req id', () => {
+    expect(
+      extractJobId('https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/NYC/Software-Engineer_R-12345/apply')
+    ).toBe('R-12345');
+    expect(
+      urlsMatch(
+        'https://acme.wd5.myworkdayjobs.com/Careers/job/NYC/Software-Engineer_R-12345?source=LinkedIn',
+        'https://acme.wd5.myworkdayjobs.com/Careers/job/NYC/Software-Engineer_R-12345/'
+      )
+    ).toBe(true);
+  });
+
+  test('Lever UUID ids and lever-source tracking', () => {
+    const id = '123e4567-e89b-12d3-a456-426614174000';
+    expect(extractJobId(`https://jobs.lever.co/acme/${id}/apply`)).toBe(id);
+    expect(
+      urlsMatch(`https://jobs.lever.co/acme/${id}?lever-source=x`, `https://jobs.lever.co/acme/${id}`)
+    ).toBe(true);
+  });
+
+  test('Greenhouse gh_src is tracking; same numeric id on different sites does not match', () => {
+    expect(
+      urlsMatch(
+        'https://boards.greenhouse.io/acme/jobs/4012345005?gh_src=abc',
+        'https://boards.greenhouse.io/acme/jobs/4012345005'
+      )
+    ).toBe(true);
+    expect(
+      urlsMatch('https://acme.com/careers/jobs/4012345005', 'https://other.com/careers/jobs/4012345005')
+    ).toBe(false);
+  });
+
+  test('Indeed country subdomains with the same jk match', () => {
+    expect(
+      urlsMatch('https://uk.indeed.com/viewjob?jk=abc123def456&from=serp', 'https://uk.indeed.com/rc/clk?jk=abc123def456')
+    ).toBe(true);
+  });
+});

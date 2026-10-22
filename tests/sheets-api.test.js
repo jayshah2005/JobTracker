@@ -8,6 +8,8 @@ import {
   seedTabHeaders,
   setRowsBold,
   loadSpreadsheetTabs,
+  loadTabRows,
+  ROW_CHUNK_SIZE,
 } from '../lib/sheets-api.js';
 
 describe('sheets-api', () => {
@@ -237,5 +239,73 @@ describe('sheets-api', () => {
         json: async () => ({}),
       });
     await expect(loadSpreadsheetTabs('id', 't')).rejects.toThrow(/429/);
+  });
+
+  describe('chunked row reads', () => {
+    const ok = (values) => ({ ok: true, json: async () => ({ values }) });
+    const mkRows = (n, from = 0) =>
+      Array.from({ length: n }, (_, i) => [`r${from + i}`]);
+    const rangeOf = (call) => decodeURIComponent(call[0]).split('/values/')[1].split('?')[0];
+
+    test('reads multiple chunks and keeps row indexes aligned', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(ok(mkRows(ROW_CHUNK_SIZE)))
+        .mockResolvedValueOnce(ok(mkRows(ROW_CHUNK_SIZE, ROW_CHUNK_SIZE)))
+        .mockResolvedValueOnce(ok(mkRows(5, ROW_CHUNK_SIZE * 2)));
+      const rows = await loadTabRows('id', "Jo'bs", 't');
+      expect(rows).toHaveLength(ROW_CHUNK_SIZE * 2 + 5);
+      expect(rows[2002]).toEqual(['r2002']);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(rangeOf(global.fetch.mock.calls[1])).toBe("'Jo''bs'!A1001:ZZ2000");
+      expect(rangeOf(global.fetch.mock.calls[2])).toBe("'Jo''bs'!A2001:ZZ3000");
+    });
+
+    test('stops when a chunk is blank or empty', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(ok(mkRows(ROW_CHUNK_SIZE)))
+        .mockResolvedValueOnce(ok(undefined));
+      const rows = await loadTabRows('id', 'Jobs', 't');
+      expect(rows).toHaveLength(ROW_CHUNK_SIZE);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test('stops after a long trailing blank run', async () => {
+      const chunk = [...mkRows(ROW_CHUNK_SIZE - 100), ...Array(100).fill([])];
+      global.fetch = jest.fn().mockResolvedValueOnce(ok(chunk));
+      const rows = await loadTabRows('id', 'Jobs', 't');
+      expect(rows).toHaveLength(ROW_CHUNK_SIZE);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('keeps blank gaps inside data and continues', async () => {
+      const first = mkRows(ROW_CHUNK_SIZE);
+      for (let i = 10; i < 60; i++) first[i] = [];
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(ok(first))
+        .mockResolvedValueOnce(ok(mkRows(3, ROW_CHUNK_SIZE)));
+      const rows = await loadTabRows('id', 'Jobs', 't');
+      expect(rows).toHaveLength(ROW_CHUNK_SIZE + 3);
+      expect(rows[30]).toEqual([]);
+      expect(rows[ROW_CHUNK_SIZE]).toEqual([`r${ROW_CHUNK_SIZE}`]);
+    });
+
+    test('treats out-of-grid 400 on a later chunk as end of data', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce(ok(mkRows(ROW_CHUNK_SIZE)))
+        .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) });
+      const rows = await loadTabRows('id', 'Jobs', 't');
+      expect(rows).toHaveLength(ROW_CHUNK_SIZE);
+    });
+
+    test('a 400 on the first chunk still throws', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) });
+      await expect(loadTabRows('id', 'Jobs', 't')).rejects.toMatchObject({ status: 400 });
+    });
   });
 });
