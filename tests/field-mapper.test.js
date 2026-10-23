@@ -364,12 +364,22 @@ describe('resolveFieldTag', () => {
         tag: FIELD_TAGS.CUSTOM_TEXTBOX,
       })
     ).toBe(FIELD_TAGS.DATE_APPLIED);
-    expect(
-      resolveFieldTag({
-        header: 'Date Posted',
-        tag: FIELD_TAGS.IGNORE,
-      })
-    ).toBe(FIELD_TAGS.JOB_POSTED_DATE);
+  });
+
+  test('keeps an explicit Ignore Column tag even for known headers', () => {
+    expect(resolveFieldTag({ header: 'Date Posted', tag: FIELD_TAGS.IGNORE })).toBe(FIELD_TAGS.IGNORE);
+    expect(resolveFieldTag({ header: 'Company', tag: FIELD_TAGS.IGNORE })).toBe(FIELD_TAGS.IGNORE);
+  });
+
+  test('ignored columns are left blank on save and hidden from the form', () => {
+    const mappings = [
+      { columnIndex: 0, header: 'Company', tag: FIELD_TAGS.COMPANY_NAME, dropdownOptions: [] },
+      { columnIndex: 1, header: 'Location', tag: FIELD_TAGS.IGNORE, dropdownOptions: [] },
+    ];
+    const data = { company: 'Acme', location: 'NYC' };
+    const row = buildRowFromMappings(mappings, [], data, { col_1: 'typed' });
+    expect(row[1]).toBe('');
+    expect(getFieldsNeedingInput(mappings, data).map((f) => f.columnIndex)).toEqual([0]);
   });
 });
 

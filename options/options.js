@@ -27,6 +27,7 @@ import {
   clearDefaultDestinationForSheet,
 } from '../lib/storage.js';
 import { getAllDestinations } from '../lib/sheet-config.js';
+import { choiceDialog, confirmDialog, promptDialog } from '../lib/dialog.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -1021,7 +1022,7 @@ function renderTabMappings(sheet, tab) {
       <p class="field-hint schema-hint">
         Edit column names and types below. Use Custom Text for a single line,
         Custom Textbox for multi-line notes, or Custom Dropdown for choices.
-        Structural edits warn first and can be undone.
+        Deleting a column removes it from the sheet; other edits can be undone.
       </p>
       <table class="mapping-table">
         <thead>
@@ -1302,18 +1303,16 @@ function bindDefaultComboboxes(container) {
  * @returns {Promise<object|null>} the response, or null if cancelled/failed
  */
 async function applyChange(spreadsheetId, tabId, change) {
-  const destructive = isDestructiveOp(change.op);
-
-  const sheet = sheets.find((s) => s.spreadsheetId === spreadsheetId);
-  const tab = sheet?.tabs?.find((t) => t.gid === tabId);
-  const willSyncNow = destructive && tab && !tab.isNew;
-
-  if (destructive) {
-    const extra = willSyncNow
-      ? '\n\nThis will rewrite the header row in Google Sheets right away.'
-      : '\n\nHeaders will be written to Google Sheets when this new tab is seeded.';
-    if (!confirm(`${DESTRUCTIVE_WARNING}${extra}\n\nContinue?`)) {
-      renderSheetList(); // revert any optimistic UI (e.g. picked field type)
+  // Delete has its own dialog; only REPLACE_ALL-style rewrites ask here.
+  if (isDestructiveOp(change.op) && change.op !== SCHEMA_OPS.DELETE) {
+    const ok = await confirmDialog({
+      title: 'Rewrite header row?',
+      message: DESTRUCTIVE_WARNING,
+      confirmLabel: 'Rewrite',
+      danger: true,
+    });
+    if (!ok) {
+      renderSheetList();
       return null;
     }
   }
@@ -1349,9 +1348,11 @@ async function applyChange(spreadsheetId, tabId, change) {
   renderSheetList();
   renderUndoBar();
   showStatus(
-    res.syncedHeaders
-      ? 'Columns updated in Google Sheets. Use Undo if this was a mistake.'
-      : 'Column settings saved. Use Undo if this was a mistake.',
+    change.op === SCHEMA_OPS.DELETE
+      ? 'Column deleted from your sheet.'
+      : res.syncedHeaders
+        ? 'Updated in Google Sheets. You can undo this.'
+        : 'Saved. You can undo this.',
     'success'
   );
   return res;
@@ -1550,10 +1551,32 @@ async function onColumnAction(e) {
   const columnIndex = parseInt(btn.dataset.col, 10);
 
   if (action === 'delete') {
-    await applyChange(spreadsheetId, tabId, {
-      op: SCHEMA_OPS.DELETE,
-      columnIndex,
+    const mapping = getMapping(spreadsheetId, tabId, columnIndex);
+    const name = mapping?.header || `column ${columnIndex + 1}`;
+    const choice = await choiceDialog({
+      title: `Remove “${name}”?`,
+      message:
+        'Hide: keeps the column and its data in your sheet; new rows leave it blank.\n' +
+        'Delete: removes it and its data from your Google Sheet. Undo restores only the empty column.',
+      choices: [
+        { value: 'hide', label: 'Hide from the form', variant: 'primary' },
+        { value: 'delete', label: 'Delete column and its data', variant: 'danger' },
+      ],
+      defaultChoice: 'hide',
     });
+    if (choice === 'hide') {
+      await applyChange(spreadsheetId, tabId, {
+        op: SCHEMA_OPS.CHANGE_TAG,
+        columnIndex,
+        newTag: FIELD_TAGS.IGNORE,
+      });
+    } else if (choice === 'delete') {
+      await applyChange(spreadsheetId, tabId, {
+        op: SCHEMA_OPS.DELETE,
+        columnIndex,
+        header: name,
+      });
+    }
     return;
   }
 
@@ -1574,13 +1597,23 @@ async function onColumnAction(e) {
 
 async function onAddColumn(e) {
   const btn = e.currentTarget;
-  const name = prompt('New column name:', 'Notes');
-  if (name == null) return;
-  const trimmed = name.trim();
-  if (!trimmed) {
-    showStatus('Column name cannot be empty.', 'error');
-    return;
-  }
+  const sheet = sheets.find((s) => s.spreadsheetId === btn.dataset.sheet);
+  const tab = sheet?.tabs?.find((t) => String(t.gid) === String(btn.dataset.tab));
+  const taken = new Set((tab?.headers || []).map((h) => String(h).trim().toLowerCase()));
+  const trimmed = await promptDialog({
+    title: 'Add a column',
+    message:
+      'It is added after your last column.',
+    label: 'Column name',
+    defaultValue: 'Notes',
+    confirmLabel: 'Add column',
+    validate: (v) => {
+      if (!v) return 'Please enter a column name.';
+      if (taken.has(v.toLowerCase())) return `Your sheet already has a column called “${v}”. Pick a different name.`;
+      return '';
+    },
+  });
+  if (trimmed == null) return;
 
   await applyChange(btn.dataset.sheet, btn.dataset.tab, {
     op: SCHEMA_OPS.ADD,
@@ -1615,7 +1648,7 @@ async function runHistoryStep(kind, entryId) {
       redoStack = res.redoStack || [];
       renderSheetList();
       showStatus(
-        `${isUndo ? 'Undid' : 'Redid'}: ${res.restored?.label || 'last change'}. Headers restored if needed.`,
+        `${isUndo ? 'Undid' : 'Redid'}: ${res.restored?.label || 'last change'}.${res.note ? ` ${res.note}` : ''}`,
         'success'
       );
     } else {
@@ -1634,7 +1667,14 @@ const handleRedo = (entryId) => runHistoryStep('redo', entryId);
 /** Disconnect a spreadsheet from the extension (the Google Sheet itself is untouched). */
 async function handleRemoveSheet(spreadsheetId) {
   const name = sheets.find((s) => s.spreadsheetId === spreadsheetId)?.name || 'this spreadsheet';
-  if (!confirm(`Remove “${name}” from Job Tracker?\n\nThe Google Sheet itself is not deleted.`)) return;
+  const ok = await confirmDialog({
+    title: `Disconnect “${name}”?`,
+    message:
+      'Your Google Sheet is not changed. You can re-add it later with its link.',
+    confirmLabel: 'Disconnect sheet',
+    danger: true,
+  });
+  if (!ok) return;
 
   try {
     const res = await sendMessage({ type: 'REMOVE_SHEET', spreadsheetId });

@@ -30,7 +30,7 @@ The **Set up Google** page also has a **Common problems and fixes** section.
 - **Settings** is for extra sheets, column mapping (rename, reorder, add, delete, field types, dropdown choices with defaults), undo/redo of column edits, and Google sign-out.
 - Share extra sheets with the same Google account, then paste more links. No extra sign-in.
 - The destination picker in the side panel appears only when you have more than one sheet tab connected.
-- Renaming, adding, deleting, or moving a column rewrites the sheet header row. You get a warning first, and Undo/Redo (Ctrl/⌘Z, Ctrl/⌘⇧Z) is available in Settings.
+- Removing a column offers **Hide from the form** (column and data stay in the sheet) or **Delete column and its data** (removes the real column from Google Sheets; other columns stay lined up). Moving a column moves its data too. Renaming and adding only change the header. Undo/Redo (Ctrl/⌘Z, Ctrl/⌘⇧Z) is in Settings; undoing a delete brings back an empty column, not the old data.
 - The floating **Job Tracker** button appears only on a **single job posting** (not careers indexes, search results, or inboxes). The toolbar icon opens the side panel on any tab. Turn the button off with **Show Job Tracker button on job pages** in Settings.
 - **Default sheet** (Settings → General) picks which spreadsheet tab is pre-selected in the side panel when saving a job. It is disabled with one sheet; removing the default sheet (or a missing tab) falls back to the first one.
 - **Link Role / Title to the job posting URL** (Settings) saves the title as a clickable link; there is no separate URL column in the default layout.
