@@ -50,6 +50,16 @@
       ],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.myworkdayjobs.com/*",
+        "https://*.myworkdaysite.com/*"
+      ],
+      "js": [
+        "content/workday-banner-fix.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "icons": {
