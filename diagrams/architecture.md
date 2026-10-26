@@ -15,6 +15,7 @@ flowchart TB
   subgraph browser [Browser tab]
     Page[Job posting page DOM]
     CS[content/content.js<br/>detect + launcher + preload trigger]
+    WBF[content/workday-banner-fix.js<br/>collapse broken Workday banner]
   end
 
   subgraph ui [Extension UI]
@@ -44,6 +45,7 @@ flowchart TB
   end
 
   Page --> CS
+  WBF -->|layout fix only| Page
   CS -->|messages| SW
   SP -->|messages| SW
   OPT -->|messages| SW

@@ -40,7 +40,7 @@ If placement is ambiguous, ask the user before inventing a new top-level folder.
 | Domain libs | `lib/*.js` | Auth helpers, Sheets HTTP, storage, extract, map, schema, duplicates | Extension UI markup; page injection chrome |
 | ATS extractors | `lib/extractors/*` | Site-specific pipelines (Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, Indeed); routed by `job-extractor.js` | Sheets; side panel; Chrome messaging |
 | Sidebar UI | `sidepanel/*` | Side panel HTML/CSS/JS, drafts, save form | Direct Sheets HTTP; `setOptions`; `executeScript` extract |
-| Page UI | `content/*` | Job-page detection (`classifyJobUrl` / `isLikelyJobPage`), floating launcher, `GET_PAGE_JOB_DATA` reply | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
+| Page UI | `content/*` | Job-page detection (`classifyJobUrl` / `isLikelyJobPage`), floating launcher, `GET_PAGE_JOB_DATA` reply; host-page layout fixes in their own scripts (`workday-banner-fix.js`) | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
 | Settings | `options/*` | Settings UI; use `lib/storage` for prefs | Background chrome wiring; raw Sheets HTTP |
 | Connect | `connect/*` | “Set up Google” page: OAuth client setup (Advanced) + sign-in troubleshooting UI | Side panel; job extraction |
 | Tests | `tests/*` | Jest coverage for `lib/` | Duplicating production logic |
