@@ -13,7 +13,8 @@ describe('prepareTabConfig', () => {
   test('creates default headers for empty sheet', () => {
     const config = prepareTabConfig('Sheet1', 'id1', '0', []);
     expect(config.isNew).toBe(true);
-    expect(config.headers).toHaveLength(6);
+    expect(config.headers).toHaveLength(7);
+    expect(config.headers).toContain('Notes');
     expect(config.headers).not.toContain('URL');
     expect(config.headers).toContain('Role');
     expect(config.mappings[0].tag).toBe(FIELD_TAGS.DATE_APPLIED);
@@ -33,6 +34,7 @@ describe('prepareTabConfig', () => {
       'Role',
       'Location',
       'Application Status',
+      'Notes',
     ]);
   });
 

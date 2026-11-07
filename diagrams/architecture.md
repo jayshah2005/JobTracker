@@ -214,7 +214,7 @@ flowchart LR
   refresh[REFRESH_SHEETS / open Settings] --> tabs
 ```
 
-Default columns: Date Applied, Job ID, Company Name, Role, Location, Application Status (URL lives in the Role hyperlink).
+Default columns: Date Applied, Job ID, Company Name, Role, Location, Application Status, Notes (URL lives in the Role hyperlink).
 
 ---
 

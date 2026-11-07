@@ -57,9 +57,9 @@ describe('isSheetEmpty', () => {
 });
 
 describe('buildDefaultMappings', () => {
-  test('creates 6 default mappings without a separate URL column', () => {
+  test('creates 7 default mappings without a separate URL column', () => {
     const mappings = buildDefaultMappings();
-    expect(mappings).toHaveLength(6);
+    expect(mappings).toHaveLength(7);
     expect(mappings.map((m) => m.header)).toEqual([
       'Date Applied',
       'Job ID',
@@ -67,7 +67,9 @@ describe('buildDefaultMappings', () => {
       'Role',
       'Location',
       'Application Status',
+      'Notes',
     ]);
+    expect(mappings[6].tag).toBe(FIELD_TAGS.CUSTOM_TEXTBOX);
     expect(mappings[0].tag).toBe(FIELD_TAGS.DATE_APPLIED);
     expect(mappings[2].tag).toBe(FIELD_TAGS.COMPANY_NAME);
     expect(mappings[3].tag).toBe(FIELD_TAGS.ROLE);
@@ -142,7 +144,7 @@ describe('buildRowFromMappings', () => {
       },
       {}
     );
-    expect(row).toHaveLength(6);
+    expect(row).toHaveLength(7);
     expect(row[1]).toBe('998877');
     expect(row[2]).toBe('Google');
     expect(row[3]).toBe(
