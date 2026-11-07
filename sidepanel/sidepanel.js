@@ -39,6 +39,7 @@ import {
   findDestinationIndexByKey,
   chooseInitialDestinationIndex,
 } from '../lib/sheet-config.js';
+import { urlsMatch } from '../lib/job-url.js';
 import { getSettings, saveSettings } from '../lib/storage.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
 import { confirmDialog } from '../lib/dialog.js';
@@ -189,6 +190,7 @@ async function saveDraft() {
   collectFieldValues();
   await chrome.storage.session.set({
     [draftKey(boundTabId)]: {
+      pageUrl: boundTabUrl,
       userInputs: { ...userInputs },
       destinationKey: selectedDestination
         ? `${selectedDestination.sheetId}:${selectedDestination.gid}`
@@ -245,7 +247,11 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
 
   if (token !== loadToken) return;
   if (tab?.id) boundTabId = tab.id;
+  const previousUrl = boundTabUrl;
   boundTabUrl = tab?.url || '';
+  // Form values belong to one posting; a new job in the same tab starts fresh.
+  const samePage = !previousUrl || urlsMatch(previousUrl, boundTabUrl);
+  if (!samePage) userInteracted = false;
 
   const signedIn = !!authRes?.signedIn;
   const needsSetup = !!authRes?.needsSetup;
@@ -292,9 +298,11 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
     return;
   }
 
-  const previousInputs = restoreDraft ? { ...userInputs } : {};
+  const previousInputs = restoreDraft && samePage ? { ...userInputs } : {};
   const draft = restoreDraft ? await loadDraft() : null;
-  if (draft?.userInputs) {
+  // The destination choice carries across pages; field values only restore
+  // for the posting they were typed on.
+  if (draft?.userInputs && urlsMatch(draft.pageUrl, boundTabUrl)) {
     Object.assign(previousInputs, draft.userInputs);
   }
 
