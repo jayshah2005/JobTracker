@@ -96,6 +96,7 @@ describe('buildGoogleAuthUrl', () => {
     expect(parsed.searchParams.get('scope')).toBe(SHEETS_SCOPE);
     expect(parsed.searchParams.get('include_granted_scopes')).toBeNull();
     expect(parsed.searchParams.get('access_type')).toBe('offline');
+    expect(parsed.searchParams.get('prompt')).toBe('select_account consent');
   });
 
   test('refuses to build a URL without a client id', () => {
