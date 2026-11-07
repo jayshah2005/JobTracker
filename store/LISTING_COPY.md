@@ -182,7 +182,7 @@ below from this file on page load — edit the fenced block and push.
 
 ```
 Privacy Policy — Job Tracker Chrome Extension
-Last updated: Oct 21, 2026
+Last updated: Nov 6, 2026
 
 Job Tracker (“the Extension”) helps you save job application information from web pages into Google Spreadsheets that you control.
 
@@ -212,15 +212,18 @@ We do not sell Google user data, use it for advertising or credit decisions, or 
 • The Extension does not send your job data or Google user data to a separate Job Tracker backend or other third-party application servers
 
 5. Data protection
-• OAuth tokens and configuration are stored in Chrome’s extension storage on your device and are not uploaded to Job Tracker servers (there is no Job Tracker backend)
-• Communication with Google OAuth and the Google Sheets API uses HTTPS
-• Access to your spreadsheets requires your Google sign-in and your grant of the Spreadsheets scope; the Extension only operates on spreadsheet links you paste and that your Google account can edit
-• We do not maintain a separate cloud database of your sheet contents
+Sensitive Google user data means your OAuth tokens and the spreadsheet contents the Extension reads or writes. We protect that data as follows:
+• In transit: every request to Google OAuth and the Google Sheets API uses HTTPS (TLS)
+• On our systems: we do not store tokens or spreadsheet contents on Job Tracker servers. There is no Job Tracker backend and no separate database of this data
+• On your device: tokens and sheet configuration stay in Chrome’s extension storage, available only to this Extension in that browser profile
+• Access control: spreadsheet access requires you to sign in with Google and grant the Spreadsheets permission. The Extension only uses spreadsheet links you paste and that your Google account can edit
 
 6. Retention and deletion of Google user data
-• OAuth tokens: kept in local Chrome storage until you sign out of Job Tracker, clear the Extension’s data in Chrome, or uninstall the Extension. Signing out removes stored tokens from the Extension; it does not by itself revoke Job Tracker’s access at Google (you can revoke access in your Google Account permissions, as described below).
-• Sheet configuration (IDs, tabs, column mappings) and UI preferences: kept locally until you remove them in Settings, clear Extension data, or uninstall
-• Spreadsheet contents: retained in your Google Sheets under your Google account’s retention controls. Deleting a row via Job Tracker (when you use delete) removes or updates that data in your sheet; uninstalling Job Tracker does not delete your Google Sheet. You can revoke Job Tracker’s access at any time in your Google Account permissions (Third-party access / Data & privacy) and delete sheet data directly in Google Sheets
+We do not retain Google user data on Job Tracker servers, so there is no server copy for us to keep or delete. Retention and deletion of the data we do handle:
+• OAuth tokens are retained only in Chrome extension storage on your device while you are signed in. Signing out deletes those tokens from the Extension. Clearing the Extension’s data in Chrome, or uninstalling it, also deletes them. Signing out does not by itself revoke Google’s authorization; you delete that access in your Google Account under Data & privacy → Third-party apps & services
+• Sheet configuration (IDs, tabs, column mappings) and UI preferences are retained locally until you remove a linked sheet in Settings, clear Extension data, or uninstall
+• Job details read from the open posting page are retained only in temporary browser session storage and are deleted when you save, close the side panel, or end the browser session
+• Spreadsheet contents are retained in your Google Sheet under your Google account until you change or delete them. Delete in Job Tracker deletes that row from your sheet. Uninstalling the Extension does not delete the spreadsheet. You can also delete rows or the whole spreadsheet yourself in Google Sheets
 
 7. Third parties
 Google (Accounts / OAuth / Sheets) under Google’s terms and privacy policy. You must use a Google account and grant access. No other third parties receive your Google user data from Job Tracker.
