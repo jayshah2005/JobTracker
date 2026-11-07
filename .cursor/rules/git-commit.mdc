@@ -5,7 +5,9 @@ alwaysApply: true
 
 # Git commit & branch
 
-Only commit when the user explicitly asks. Never commit proactively.
+**Never commit, push, or open a PR unless the user explicitly asks or tells you to — each one separately.**
+Finishing a task, passing tests, or earlier approval in the conversation is not permission. If you think a
+commit/push/PR is due, ask first. A request to "create a PR" covers that task's branch only, not later work.
 
 ## Before every commit (branch check)
 
@@ -16,15 +18,11 @@ Only commit when the user explicitly asks. Never commit proactively.
 3. If the branch is wrong or missing, **stop and fix first**: create/checkout the correct branch (from the requested base, default `main`), then commit there.
 4. If unsure which branch fits, ask before committing.
 
-## After commit (push + PR)
+## After commit
 
-Unless the user says otherwise (e.g. “commit only”, “don’t push”, “no PR”):
-
-1. Push the branch (`git push -u origin HEAD` if needed).
-2. Open a PR into the base branch (default `main`) with `gh pr create`.
-3. Return the PR URL when done.
-
-Skip the PR only when explicitly told not to create one.
+Do **not** push or open a PR automatically. Stop after the commit (if one was requested) and ask whether to
+push and/or open a PR. When asked to open a PR, push the branch (`git push -u origin HEAD`), run
+`gh pr create` into the base branch (default `main`), and return the PR URL.
 
 ## Message format
 
