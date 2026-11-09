@@ -1,0 +1,506 @@
+/*
+ * Shared Job Tracker UI primitives (extension pages only): reset, buttons, fields, comboboxes, status
+ * banners, badges, brand lockup, dialogs share lib/dialog.css. Requires lib/tokens.css to load first.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--jt-font);
+  font-size: var(--jt-text-md);
+  line-height: 1.45;
+  color: var(--jt-text);
+  background: var(--jt-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden,
+[hidden] {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+a {
+  color: var(--jt-primary-text);
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[role='tab']:focus-visible {
+  outline: var(--jt-focus-outline);
+  outline-offset: 2px;
+}
+
+/* Brand lockup: logo + "Job Tracker" wordmark. Same markup/size on every extension page. */
+.jt-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--jt-text);
+  text-decoration: none;
+}
+
+.jt-brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: cover;
+}
+
+.jt-brand-name {
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--jt-radius);
+  font-family: inherit;
+  font-size: var(--jt-text-md);
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--jt-primary);
+  color: var(--jt-on-primary);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--jt-primary-hover);
+}
+
+.btn-secondary {
+  background: var(--jt-card);
+  color: var(--jt-text);
+  border-color: var(--jt-border-strong);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--jt-sunken);
+}
+
+/* Tinted primary (e.g. "Update entry"). */
+.btn-primary-outline {
+  background: var(--jt-primary-soft);
+  color: var(--jt-primary-text);
+  border-color: var(--jt-primary-soft-border);
+}
+
+.btn-primary-outline:hover:not(:disabled) {
+  border-color: var(--jt-primary);
+}
+
+/* Destructive: outlined by default; confirm dialogs use the solid .jt-dialog-btn-danger. */
+.btn-danger,
+.btn-danger-outline {
+  background: var(--jt-card);
+  color: var(--jt-danger-fg);
+  border-color: var(--jt-danger-border);
+}
+
+.btn-danger:hover:not(:disabled),
+.btn-danger-outline:hover:not(:disabled) {
+  background: var(--jt-danger-bg);
+  border-color: var(--jt-danger);
+}
+
+.btn-ghost,
+.btn-link-small {
+  background: transparent;
+  color: var(--jt-primary-text);
+  border-color: transparent;
+}
+
+.btn-ghost:hover:not(:disabled),
+.btn-link-small:hover:not(:disabled) {
+  background: var(--jt-primary-soft);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: var(--jt-text-sm);
+}
+
+.btn-xs {
+  padding: 2px 8px;
+  font-size: var(--jt-text-xs);
+  min-width: 28px;
+}
+
+.btn-link-small {
+  padding: 3px 8px;
+  font-size: var(--jt-text-sm);
+  border-radius: var(--jt-radius-sm);
+}
+
+.btn-link-small[aria-pressed='true'] {
+  color: var(--jt-success-fg);
+  cursor: default;
+}
+
+/* Fields */
+label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--jt-text-sm);
+  font-weight: 600;
+  color: var(--jt-text);
+}
+
+input[type='text'],
+input[type='url'],
+input[type='date'],
+input[type='password'],
+select,
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--jt-border-strong);
+  border-radius: var(--jt-radius);
+  background: var(--jt-card);
+  color: var(--jt-text);
+  font-family: inherit;
+  font-size: var(--jt-text-md);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--jt-muted);
+  opacity: 0.8;
+}
+
+textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--jt-primary);
+  box-shadow: var(--jt-focus-ring);
+}
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238a92a6' d='M1.4 1.4 6 6l4.6-4.6L12 2.8 6 8.8 0 2.8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 7px;
+  padding-right: 28px;
+}
+
+.field-row {
+  margin-bottom: 10px;
+}
+
+.field-row.low-confidence input,
+.field-row.low-confidence textarea {
+  border-color: var(--jt-warning-border);
+  background: var(--jt-warning-bg);
+}
+
+.field-hint {
+  margin-top: -6px;
+  margin-bottom: 8px;
+  font-size: var(--jt-text-xs);
+  color: var(--jt-muted);
+}
+
+/* Searchable text dropdown */
+.combo {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.combo.is-disabled,
+.combo.is-disabled .combo-input {
+  opacity: 0.65;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.combo-control {
+  position: relative;
+  display: block;
+  width: 100%;
+  border: 1px solid var(--jt-border-strong);
+  border-radius: var(--jt-radius);
+  background: var(--jt-card);
+}
+
+.combo.is-open .combo-control,
+.combo-control:focus-within {
+  border-color: var(--jt-primary);
+  box-shadow: var(--jt-focus-ring);
+}
+
+.combo-input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: var(--jt-radius) !important;
+  padding: 8px 28px 8px 10px !important;
+  font-size: var(--jt-text-md);
+  line-height: 1.25;
+  background: transparent !important;
+  color: var(--jt-text);
+  appearance: none;
+}
+
+.combo-input:focus {
+  outline: none;
+}
+
+.combo-caret {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238a92a6' d='M1.4 1.4 6 6l4.6-4.6L12 2.8 6 8.8 0 2.8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 10px 7px;
+  cursor: pointer;
+  font-size: 0;
+  color: transparent;
+}
+
+.combo-menu {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--jt-card);
+  border: 1px solid var(--jt-border);
+  border-radius: var(--jt-radius);
+  box-shadow: var(--jt-shadow-md);
+}
+
+.combo-menu.hidden {
+  display: none;
+}
+
+.combo-item {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: var(--jt-radius-sm);
+}
+
+.combo-item:hover,
+.combo-item.is-active {
+  background: var(--jt-sunken);
+}
+
+.combo-pick,
+.combo-add {
+  flex: 1;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--jt-radius-sm);
+  background: transparent;
+  text-align: start;
+  font-family: inherit;
+  font-size: var(--jt-text-md);
+  color: var(--jt-text);
+  cursor: pointer;
+}
+
+.combo-add {
+  color: var(--jt-primary-text);
+  font-weight: 600;
+}
+
+.combo-remove {
+  flex-shrink: 0;
+  width: 28px;
+  border: none;
+  border-radius: var(--jt-radius-sm);
+  background: transparent;
+  color: var(--jt-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.combo-remove:hover {
+  color: var(--jt-danger-fg);
+  background: var(--jt-danger-bg);
+}
+
+.combo-empty {
+  padding: 8px;
+  font-size: var(--jt-text-sm);
+  color: var(--jt-muted);
+}
+
+/* Status banners (success / error / info / warning) */
+.status {
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--jt-radius);
+  font-size: var(--jt-text-sm);
+  line-height: 1.4;
+}
+
+.status-success {
+  background: var(--jt-success-bg);
+  color: var(--jt-success-fg);
+  border-color: var(--jt-success-border);
+}
+
+.status-error {
+  background: var(--jt-danger-bg);
+  color: var(--jt-danger-fg);
+  border-color: var(--jt-danger-border);
+}
+
+.status-info {
+  background: var(--jt-info-bg);
+  color: var(--jt-info-fg);
+  border-color: var(--jt-info-border);
+}
+
+.status-warning {
+  background: var(--jt-warning-bg);
+  color: var(--jt-warning-fg);
+  border-color: var(--jt-warning-border);
+}
+
+/* Pills / badges */
+.badge,
+.auth-pill,
+.applied-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--jt-border);
+  border-radius: var(--jt-radius-pill);
+  background: var(--jt-sunken);
+  color: var(--jt-muted);
+  font-size: var(--jt-text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.auth-pill {
+  background: var(--jt-success-bg);
+  color: var(--jt-success-fg);
+  border-color: var(--jt-success-border);
+}
+
+.applied-badge {
+  background: var(--jt-primary-soft);
+  color: var(--jt-primary-text);
+  border-color: var(--jt-primary-soft-border);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--jt-primary-soft-border);
+  border-top-color: var(--jt-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.btn-primary .spinner {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+
+  /* A spinning ring becomes a slow, gentle pulse instead of a flicker. */
+  .spinner {
+    animation: spinner-pulse 1.6s ease-in-out infinite;
+    border-color: var(--jt-primary);
+  }
+
+  .btn-primary .spinner {
+    border-color: #fff;
+  }
+}
+
+@keyframes spinner-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Touch targets: at least 32px tall on coarse pointers. */
+@media (pointer: coarse) {
+  .btn,
+  .btn-sm,
+  .btn-xs,
+  .btn-link-small,
+  .combo-pick,
+  .combo-add {
+    min-height: 32px;
+    min-width: 32px;
+  }
+}

@@ -3,115 +3,70 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Privacy Policy — Job Tracker</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <title>Job Tracker — Privacy policy</title>
+  <link rel="icon" href="icons/icon32.png" />
+  <!-- Same tokens/primitives as the extension pages (repo root is the site root, so these resolve). -->
+  <link rel="stylesheet" href="lib/tokens.css" />
+  <link rel="stylesheet" href="lib/ui.css" />
   <style>
-    :root {
-      --ink: #1a2332;
-      --muted: #5c6b7a;
-      --line: #d8e0e8;
-      --bg: #f7f9fb;
-      --paper: #ffffff;
-      --accent: #0f6b5c;
-    }
-
-    * { box-sizing: border-box; }
-
     body {
-      margin: 0;
       min-height: 100vh;
-      font-family: "IBM Plex Sans", system-ui, sans-serif;
-      font-size: 1.05rem;
+      font-size: 16px;
       line-height: 1.65;
-      color: var(--ink);
-      background:
-        radial-gradient(1200px 500px at 10% -10%, #e4f0ec 0%, transparent 55%),
-        radial-gradient(900px 400px at 100% 0%, #e8eef5 0%, transparent 50%),
-        var(--bg);
+      background: linear-gradient(180deg, var(--jt-primary-soft) 0%, transparent 320px), var(--jt-bg);
     }
 
-    main {
-      max-width: 56rem;
-      margin: 0 auto;
-      padding: 2.5rem 1.5rem 4rem;
-    }
+    main { max-width: 52rem; margin: 0 auto; padding: 40px 20px 64px; }
+    .jt-brand { margin-bottom: 20px; }
 
     article {
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      padding: 2.5rem 2.75rem;
-      box-shadow: 0 1px 0 rgba(26, 35, 50, 0.04);
+      background: var(--jt-card);
+      border: 1px solid var(--jt-border);
+      border-radius: var(--jt-radius-lg);
+      padding: 32px 36px;
+      box-shadow: var(--jt-shadow-sm);
     }
 
     h1 {
-      margin: 0 0 0.35rem;
-      font-family: "Source Serif 4", Georgia, serif;
-      font-weight: 600;
-      font-size: clamp(1.65rem, 4vw, 2.1rem);
+      margin: 0 0 4px;
+      font-size: clamp(1.6rem, 4vw, 2rem);
       line-height: 1.25;
-      letter-spacing: -0.02em;
+      font-weight: 700;
+      letter-spacing: -0.03em;
     }
 
-    .meta {
-      margin: 0 0 1.5rem;
-      color: var(--muted);
-      font-size: 0.95rem;
-    }
+    .meta { margin: 0 0 24px; color: var(--jt-muted); font-size: 14px; }
 
     h2 {
-      margin: 1.75rem 0 0.5rem;
-      font-family: "Source Serif 4", Georgia, serif;
-      font-weight: 600;
-      font-size: 1.15rem;
-      color: var(--accent);
+      margin: 28px 0 8px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
     }
 
-    p { margin: 0 0 0.85rem; }
+    p { margin: 0 0 12px; }
+    ul { margin: 0 0 12px; padding-left: 1.25rem; }
+    li { margin: 4px 0; }
+    li::marker { color: var(--jt-primary-text); }
 
-    ul {
-      margin: 0 0 0.85rem;
-      padding-left: 1.2rem;
-    }
+    .status { margin: 0; padding: 0; border: none; background: none; font-size: inherit; color: var(--jt-muted); }
+    .status.error { color: var(--jt-danger-fg); }
 
-    li { margin: 0.25rem 0; }
-
-    li::marker { color: var(--accent); }
-
-    .status {
-      margin: 0;
-      color: var(--muted);
-    }
-
-    .status.error { color: #9b2c2c; }
-
-    footer {
-      margin-top: 1.5rem;
-      color: var(--muted);
-      font-size: 0.85rem;
-    }
-
-    footer a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-
+    footer { margin-top: 24px; color: var(--jt-muted); font-size: 14px; }
+    footer a { text-decoration: none; font-weight: 500; }
     footer a:hover { text-decoration: underline; }
 
     @media (max-width: 520px) {
-      article {
-        padding: 1.5rem 1.15rem;
-        border-radius: 0;
-        border-left: none;
-        border-right: none;
-      }
+      article { padding: 24px 18px; border-radius: 0; border-left: none; border-right: none; }
     }
   </style>
 </head>
 <body>
   <main>
+    <a class="jt-brand" href="./">
+      <img src="icons/logo.png" width="28" height="28" alt="" />
+      <span class="jt-brand-name">Job Tracker</span>
+    </a>
     <article id="policy">
       <p class="status">Loading privacy policy…</p>
     </article>

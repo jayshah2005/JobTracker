@@ -6,18 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Job Tracker — Settings</title>
     <link rel="icon" href="../icons/icon32.png" type="image/png" />
+    <link rel="stylesheet" href="../lib/tokens.css" />
+    <link rel="stylesheet" href="../lib/ui.css" />
     <link rel="stylesheet" href="options.css" />
     <link rel="stylesheet" href="../lib/dialog.css" />
   </head>
   <body>
     <header class="page-header">
-      <div class="page-brand">
-        <img class="page-logo" src="../icons/logo.png" width="36" height="36" alt="" />
-        <div>
-          <h1>Job Tracker Settings</h1>
-          <p>Sign in with Google, then paste spreadsheet links you can edit.</p>
-        </div>
+      <div class="jt-brand">
+        <img src="../icons/logo.png" width="28" height="28" alt="" />
+        <span class="jt-brand-name">Job Tracker</span>
       </div>
+      <h1>Settings</h1>
+      <p>Sign in with Google, then create or choose the sheets Job Tracker can use.</p>
     </header>
 
     <div class="page-content">
@@ -35,22 +36,22 @@
         </div>
       </div>
 
-      <div class="help-box">
-        <strong>How it works</strong>
+      <details class="help-box" id="help-box">
+        <summary>How it works</summary>
         <ol>
           <li>First time: click Sign in with Google. If it says setup is needed, follow the steps in Set up Google, then sign in once.</li>
-          <li>Paste links to any spreadsheets that account can already edit.</li>
+          <li>Create a tracker sheet, or choose an existing one from Google Drive. Job Tracker only accesses sheets it creates or you choose.</li>
           <li>Edit columns if you want. Renaming, adding, deleting, or moving a column warns you first, and every column edit can be undone.</li>
           <li>Visit a job posting and open the sidebar from the floating button or toolbar icon.</li>
           <li>If sign-in fails, open Set up Google and check Common problems and fixes.</li>
         </ol>
-      </div>
+      </details>
 
       <div class="section">
         <div class="section-title">Google account</div>
         <div class="card">
           <div id="google-signed-out">
-            <p class="setup-lead">Sign in once. That account is used for every spreadsheet you add.</p>
+            <p class="setup-lead">Sign in once. Job Tracker only accesses sheets it creates or you choose.</p>
             <div class="actions-row">
               <button class="btn btn-primary btn-sm" id="sign-in-btn" type="button">Sign in with Google</button>
               <button class="btn btn-secondary btn-sm" id="open-connect-btn" type="button">Set up Google</button>
@@ -58,7 +59,7 @@
           </div>
           <div id="google-signed-in" class="hidden">
             <p class="setup-lead">
-              <strong>Connected.</strong> This Google account is used for every spreadsheet you add.
+              <strong>Connected.</strong> Job Tracker only accesses sheets it creates or you choose.
             </p>
             <div class="actions-row">
               <button class="btn btn-secondary btn-sm" id="sign-out-btn" type="button">Sign out</button>
@@ -69,31 +70,35 @@
       </div>
 
       <div class="section">
-        <div class="section-title">Spreadsheets</div>
+        <div class="section-title">Sheets</div>
         <div class="add-sheet-block">
-          <label class="add-sheet-label" for="sheet-url">Paste a Google Sheets link</label>
-          <p class="add-sheet-hint">
-            Copy the spreadsheet URL from your browser address bar, then paste it here.
-            You need Editor access on that sheet.
-          </p>
-          <div class="add-sheet-form">
-            <input
-              type="url"
-              id="sheet-url"
-              placeholder="https://docs.google.com/spreadsheets/d/…"
-              autocomplete="off"
-              spellcheck="false"
-              aria-describedby="sheet-url-hint"
-            />
-            <button class="btn btn-primary" id="add-sheet-btn" type="button">Add Sheet</button>
+          <div class="actions-row">
+            <button class="btn btn-primary" id="create-sheet-btn" type="button">Create tracker sheet</button>
+            <button class="btn btn-secondary" id="choose-sheet-btn" type="button">Choose from Google Drive</button>
           </div>
-          <p id="sheet-url-hint" class="add-sheet-example">
-            Example: https://docs.google.com/spreadsheets/d/1abc…/edit
-          </p>
+          <p id="picker-hint" class="add-sheet-hint hidden" role="status" aria-live="polite"></p>
+          <p id="access-note" class="add-sheet-hint">Job Tracker only accesses sheets it creates or you choose.</p>
+          <details class="paste-link">
+            <summary>Or paste a sheet link</summary>
+            <label class="add-sheet-label" for="sheet-url">Google Sheet link</label>
+            <div class="add-sheet-form">
+              <input
+                type="url"
+                id="sheet-url"
+                placeholder="https://docs.google.com/spreadsheets/d/…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button class="btn btn-secondary" id="add-sheet-btn" type="button">Add sheet</button>
+            </div>
+            <div class="actions-row">
+              <button class="btn btn-primary btn-sm hidden" id="grant-sheet-btn" type="button">Grant access to this sheet</button>
+            </div>
+          </details>
         </div>
         <div id="sheet-list" class="sheet-list"></div>
         <div class="actions-row">
-          <button type="button" class="btn btn-secondary btn-sm" id="refresh-btn">Refresh All Sheets</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="refresh-btn">Refresh all sheets</button>
         </div>
       </div>
 
