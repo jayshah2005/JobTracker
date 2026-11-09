@@ -14,9 +14,6 @@ import {
   saveOAuthClientId,
   getOAuthClientSecret,
   saveOAuthClientSecret,
-  getOauthPkce,
-  saveOauthPkce,
-  clearOauthPkce,
   getGoogleToken,
   saveGoogleToken,
   clearGoogleToken,
@@ -24,6 +21,8 @@ import {
 import {
   sheetsAccessError,
   SIGN_IN_REQUIRED,
+  SCOPE_UPGRADE_REQUIRED,
+  hasRequiredScope,
   effectiveClientId,
   effectiveClientSecret,
   hasPublishedOAuthDefaults,
@@ -57,15 +56,23 @@ export async function getOauthSetup() {
   const clientId = effectiveClientId(storedId);
   const clientSecret = effectiveClientSecret(storedSecret);
   const token = await getGoogleToken();
-  const hasSession = Boolean(token?.refreshToken) || isAccessTokenFresh(token);
+  // Sessions granted under the old broad scope must sign in again.
+  const scopeOutdated = Boolean(token) && !hasRequiredScope(token);
+  const hasSession =
+    !scopeOutdated && (Boolean(token?.refreshToken) || isAccessTokenFresh(token));
+  const usingCustomClient = Boolean(String(storedId || '').trim());
+  const usingPublishedOAuth = hasPublishedOAuthDefaults();
   return {
     success: true,
     redirectUri: getRedirectUri(),
     clientId,
     hasSecret: Boolean(clientSecret),
     needsSetup: !clientId || !clientSecret,
-    usingPublishedOAuth: hasPublishedOAuthDefaults(),
-    usingCustomClient: Boolean(String(storedId || '').trim()),
+    usingPublishedOAuth,
+    usingCustomClient,
+    // The website Picker shares the published client's Cloud project only.
+    pickerAvailable: usingPublishedOAuth && !usingCustomClient,
+    scopeOutdated,
     // Refresh token means the user already granted access; access tokens expire ~1h.
     signedIn: hasSession,
   };
@@ -102,11 +109,12 @@ export async function getAuthStatus() {
       clientId: setup.clientId,
       usingPublishedOAuth: setup.usingPublishedOAuth,
       usingCustomClient: setup.usingCustomClient,
+      pickerAvailable: false,
     };
   }
 
   const token = await getGoogleToken();
-  if (token?.refreshToken && !isAccessTokenFresh(token)) {
+  if (token?.refreshToken && !isAccessTokenFresh(token) && hasRequiredScope(token)) {
     try {
       await requestGoogleToken(false);
     } catch {
@@ -125,7 +133,14 @@ export async function getAuthStatus() {
     clientId: fresh.clientId,
     usingPublishedOAuth: fresh.usingPublishedOAuth,
     usingCustomClient: fresh.usingCustomClient,
+    pickerAvailable: fresh.pickerAvailable,
+    ...(fresh.scopeOutdated ? { scopeOutdated: true, message: SCOPE_UPGRADE_REQUIRED } : {}),
   };
+}
+
+/** True when the website Picker can grant access (published client in use). */
+export async function isPickerAvailable() {
+  return (await getOauthSetup()).pickerAvailable;
 }
 
 /** Promise wrapper for chrome.identity.launchWebAuthFlow (callback API). */
@@ -143,6 +158,8 @@ function launchAuthFlow(url, interactive) {
 
 /** Shared in-flight silent refresh so parallel callers don't race on the refresh token. */
 let silentRefreshInFlight = null;
+/** Shared in-flight interactive sign-in (one consent window at a time). */
+let interactiveInFlight = null;
 
 /**
  * Get a valid access token.
@@ -158,7 +175,11 @@ async function requestGoogleToken(interactive) {
     });
     return silentRefreshInFlight;
   }
-  return requestGoogleTokenUncached(true);
+  // Parallel 401s (or a double-clicked Sign in) must not open two consent windows.
+  interactiveInFlight ??= requestGoogleTokenUncached(true).finally(() => {
+    interactiveInFlight = null;
+  });
+  return interactiveInFlight;
 }
 
 async function requestGoogleTokenUncached(interactive) {
@@ -170,12 +191,17 @@ async function requestGoogleTokenUncached(interactive) {
   const clientSecret = await resolveClientSecret();
   const existing = await getGoogleToken();
 
-  if (existing?.refreshToken) {
+  if (existing && !hasRequiredScope(existing)) {
+    // Old broad-scope session: drop it so the user re-consents to drive.file.
+    await clearGoogleToken();
+    if (!interactive) throw new Error(SCOPE_UPGRADE_REQUIRED);
+  } else if (existing?.refreshToken) {
     try {
       const refreshed = await refreshAccessToken({
         clientId,
         clientSecret: clientSecret || undefined,
         refreshToken: existing.refreshToken,
+        scope: existing.scope,
       });
       await saveGoogleToken(refreshed);
       return refreshed.accessToken;
@@ -197,37 +223,24 @@ async function requestGoogleTokenUncached(interactive) {
 
   const redirectUri = getRedirectUri();
   const pkce = await createPkcePair();
-  // Persist the verifier: the service worker can be suspended while the
-  // consent window is open and would otherwise lose it.
-  await saveOauthPkce({ verifier: pkce.verifier, redirectUri, clientId });
 
-  let parsed;
-  try {
-    const url = buildGoogleAuthUrl({
-      clientId,
-      redirectUri,
-      codeChallenge: pkce.challenge,
-    });
-    parsed = parseOAuthRedirect(await launchAuthFlow(url, true));
-  } catch (err) {
-    await clearOauthPkce();
-    throw err;
-  }
+  const url = buildGoogleAuthUrl({
+    clientId,
+    redirectUri,
+    codeChallenge: pkce.challenge,
+  });
+  const parsed = parseOAuthRedirect(await launchAuthFlow(url, true));
   if (!parsed.ok) {
-    await clearOauthPkce();
     throw new Error(parsed.error);
   }
-
-  const pending = (await getOauthPkce()) || pkce;
-  await clearOauthPkce();
 
   if (parsed.code) {
     const tokenInfo = await exchangeCodeForToken({
       clientId,
       clientSecret: clientSecret || undefined,
       code: parsed.code,
-      redirectUri: pending.redirectUri || redirectUri,
-      codeVerifier: pending.verifier,
+      redirectUri,
+      codeVerifier: pkce.verifier,
     });
     await saveGoogleToken(tokenInfo);
     return tokenInfo.accessToken;
@@ -238,6 +251,7 @@ async function requestGoogleTokenUncached(interactive) {
     await saveGoogleToken({
       accessToken: parsed.accessToken,
       expiresAt: parsed.expiresAt,
+      scope: parsed.scope,
       refreshToken: '',
     });
     return parsed.accessToken;
@@ -251,7 +265,7 @@ export async function signIn() {
   try {
     const setup = await getOauthSetup();
     if (setup.needsSetup) {
-      return { success: false, signedIn: false, needsSetup: true, ...setup };
+      return { ...setup, success: false, signedIn: false, needsSetup: true };
     }
     const token = await requestGoogleToken(true);
     return { success: true, signedIn: Boolean(token), needsSetup: false };
@@ -275,7 +289,8 @@ export async function signOut() {
  */
 export async function withSheetAccess(fn) {
   const tokenInfo = await getGoogleToken();
-  let token = isAccessTokenFresh(tokenInfo) ? tokenInfo.accessToken : null;
+  let token =
+    isAccessTokenFresh(tokenInfo) && hasRequiredScope(tokenInfo) ? tokenInfo.accessToken : null;
 
   if (!token) {
     try {
@@ -283,7 +298,9 @@ export async function withSheetAccess(fn) {
     } catch (err) {
       // Keep transient network problems distinguishable from "sign in again".
       throw new Error(
-        err.message === SIGN_IN_REQUIRED ? SIGN_IN_REQUIRED : sheetsAccessError(err.message)
+        err.message === SIGN_IN_REQUIRED || err.message === SCOPE_UPGRADE_REQUIRED
+          ? err.message
+          : sheetsAccessError(err.message)
       );
     }
   }
@@ -292,7 +309,13 @@ export async function withSheetAccess(fn) {
     return await fn(token);
   } catch (err) {
     const msg = err.message || '';
-    if (err.status === 401 || /\b401\b|invalid.?token|unauthenticated/i.test(msg)) {
+    // Trust the HTTP status when there is one: a tab or file name that merely
+    // contains "401" in an error message must not open the sign-in window.
+    const unauthorized =
+      err.status != null
+        ? err.status === 401
+        : /\b401\b|invalid.?token|unauthenticated/i.test(msg);
+    if (unauthorized) {
       // Keep the refresh token so the retry can be silent.
       const latest = await getGoogleToken();
       if (latest) await saveGoogleToken({ ...latest, accessToken: '', expiresAt: 0 });
@@ -302,9 +325,9 @@ export async function withSheetAccess(fn) {
         // escapes this try/catch and skips the friendly-message translation.
         return await fn(fresh);
       } catch (retryErr) {
-        throw new Error(sheetsAccessError(retryErr.message));
+        throw new Error(sheetsAccessError(retryErr.message, retryErr.status));
       }
     }
-    throw new Error(sheetsAccessError(msg));
+    throw new Error(sheetsAccessError(msg, err.status));
   }
 }
