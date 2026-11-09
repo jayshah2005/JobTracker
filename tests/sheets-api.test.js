@@ -13,6 +13,8 @@ import {
   moveColumn,
   insertColumn,
   ROW_CHUNK_SIZE,
+  renameSheetTab,
+  saveJobToTab,
 } from '../lib/sheets-api.js';
 
 describe('sheets-api', () => {
@@ -361,5 +363,49 @@ describe('sheets-api', () => {
     expect(JSON.parse(global.fetch.mock.calls[1][1].body).requests[0].appendDimension).toEqual({
       sheetId: 9, dimension: 'COLUMNS', length: 3,
     });
+  });
+
+  describe('argument validation (nothing is sent on bad input)', () => {
+    beforeEach(() => {
+      global.fetch = jest.fn();
+    });
+    afterEach(() => {
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    test('updateRow rejects a negative or non-numeric row', async () => {
+      await expect(updateRow('s', 'Tab', -1, ['a'], 't')).rejects.toThrow('Invalid row');
+      await expect(updateRow('s', 'Tab', 'x', ['a'], 't')).rejects.toThrow('Invalid row');
+    });
+
+    test('renameSheetTab rejects a bad id and a blank title', async () => {
+      await expect(renameSheetTab('s', 'abc', 'New', 't')).rejects.toThrow('Invalid sheet tab id');
+      await expect(renameSheetTab('s', 1, '   ', 't')).rejects.toThrow('cannot be empty');
+    });
+
+    test('deleteJobRowInTab refuses the header row and bad indexes', async () => {
+      await expect(deleteJobRowInTab('s', 1, 0, 't')).rejects.toThrow('header row');
+      await expect(deleteJobRowInTab('s', 1, -2, 't')).rejects.toThrow('Invalid row');
+      await expect(deleteJobRowInTab('s', 'x', 3, 't')).rejects.toThrow('Invalid sheet tab id');
+    });
+
+    test('setRowsBold rejects an empty range', async () => {
+      await expect(setRowsBold('s', 1, 5, 5, 3, true, 't')).rejects.toThrow('Invalid row range');
+    });
+  });
+
+  test('saveJobToTab: a failed bold-reset after a successful append still resolves (row was written)', async () => {
+    const calls = [];
+    global.fetch = jest.fn(async (url) => {
+      calls.push(String(url));
+      if (String(url).includes(':append')) {
+        return { ok: true, json: async () => ({ updates: { updatedRange: "'Jobs'!A5:C5" } }) };
+      }
+      return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
+    });
+    const res = await saveJobToTab('s', "Bob's Jobs", { isNew: false, sheetId: 7 }, ['a', 'b', 'c'], 't');
+    expect(res.updates.updatedRange).toBe("'Jobs'!A5:C5");
+    expect(calls[0]).toContain(encodeURIComponent("'Bob''s Jobs'!A:A"));
+    expect(calls.some((u) => u.includes(':batchUpdate'))).toBe(true); // bold reset was attempted
   });
 });

@@ -16,6 +16,7 @@ import {
   buildHyperlinkFormula,
   hyperlinkLabel,
   rowToFormInputs,
+  neutralizeFormula,
 } from '../lib/field-mapper.js';
 import { FIELD_TAGS, DEFAULT_APPLICATION_STATUSES } from '../lib/constants.js';
 
@@ -599,5 +600,86 @@ describe('DEFAULT_APPLICATION_STATUSES', () => {
   test('includes Not Applied for wishlist / pre-apply tracking', () => {
     expect(DEFAULT_APPLICATION_STATUSES).toContain('Not Applied');
     expect(DEFAULT_APPLICATION_STATUSES).toContain('Applied');
+  });
+});
+
+describe('toDateInputValue bare years', () => {
+  test('a bare year or year-month is not turned into a (timezone-shifted) date', () => {
+    expect(toDateInputValue('2025')).toBe('');
+    expect(toDateInputValue('2025-08')).toBe('');
+    expect(toDateInputValue('2025-08-15')).toBe('2025-08-15');
+  });
+});
+
+describe('formula injection guard', () => {
+  test.each([
+    ['=IMPORTXML("http://x","//a")', "'=IMPORTXML(\"http://x\",\"//a\")"],
+    ['+SUM(1)', "'+SUM(1)"],
+    ['-cmd|calc', "'-cmd|calc"],
+    ['@SUM(A1)', "'@SUM(A1)"],
+  ])('%s is stored as text', (input, expected) => {
+    expect(neutralizeFormula(input)).toBe(expected);
+  });
+
+  test.each(['Acme', '', '-5', '+1.5', '12 =', 'a=b'])('leaves %p alone', (v) => {
+    expect(neutralizeFormula(v)).toBe(v);
+  });
+
+  test('non-strings pass through', () => {
+    expect(neutralizeFormula(undefined)).toBeUndefined();
+    expect(neutralizeFormula(5)).toBe(5);
+  });
+
+  test('buildRowFromMappings neutralizes scraped values but keeps its own HYPERLINK', () => {
+    const mappings = buildDefaultMappings();
+    const row = buildRowFromMappings(
+      mappings,
+      [],
+      { company: '=EVIL()', role: '=EVIL2()', location: '@x', url: 'https://x.test/j/1' },
+      {}
+    );
+    const col = (h) => mappings.find((m) => m.header === h).columnIndex;
+    expect(row[col('Company Name')]).toBe("'=EVIL()");
+    expect(row[col('Location')]).toBe("'@x");
+    // Role keeps the single formula we generate; the scraped text is only its quoted label.
+    expect(row[col('Role')]).toBe('=HYPERLINK("https://x.test/j/1","=EVIL2()")');
+  });
+});
+
+describe('formula guard round trips', () => {
+  test('a bare =HYPERLINK title with no URL stays text (not our own formula)', () => {
+    const mappings = buildDefaultMappings();
+    const row = buildRowFromMappings(
+      mappings,
+      [],
+      { company: 'Acme', role: '=HYPERLINK("http://evil","x")', url: '' },
+      {}
+    );
+    const roleCol = mappings.find((m) => resolveFieldTag(m) === FIELD_TAGS.ROLE).columnIndex;
+    expect(row[roleCol].startsWith("'=")).toBe(true);
+  });
+
+  test('titles and URLs with quotes are doubled inside HYPERLINK', () => {
+    expect(buildHyperlinkFormula('https://x.test/?q="a"', 'The "Best" Job')).toBe(
+      '=HYPERLINK("https://x.test/?q=""a""","The ""Best"" Job")'
+    );
+  });
+
+  test('reading back a marked cell and re-saving does not stack apostrophes', () => {
+    const mappings = buildDefaultMappings();
+    const companyCol = mappings.find((m) => resolveFieldTag(m) === FIELD_TAGS.COMPANY_NAME).columnIndex;
+    for (const readBack of ["'=Evil Corp", '=Evil Corp']) {
+      const stored = [];
+      stored[companyCol] = readBack;
+      const inputs = rowToFormInputs(mappings, stored);
+      expect(inputs[`col_${companyCol}`]).toBe('=Evil Corp');
+      const row = buildRowFromMappings(mappings, [], {}, inputs);
+      expect(row[companyCol]).toBe("'=Evil Corp");
+    }
+  });
+
+  test('signed numbers and phone-like text stay sane', () => {
+    expect(neutralizeFormula('-5')).toBe('-5');
+    expect(neutralizeFormula('+1 (555) 123')).toBe("'+1 (555) 123");
   });
 });

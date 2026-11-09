@@ -15,10 +15,12 @@
 import {
   loadSpreadsheetTabs,
   loadTabRows,
+  loadRow,
   saveJobToTab,
   updateJobInTab,
   deleteJobRowInTab,
   fetchSpreadsheetMetadata,
+  createSpreadsheet,
   syncTabHeaders,
   seedTabHeaders,
   deleteColumn,
@@ -28,7 +30,7 @@ import {
   renameSheetTab,
   rowIndexFromUpdatedRange,
 } from '../lib/sheets-api.js';
-import { parseGoogleSheetUrl } from '../lib/sheet-url.js';
+import { parseGoogleSheetUrl, buildSheetUrl } from '../lib/sheet-url.js';
 import { prepareTabConfig, mergeTabMappings } from '../lib/sheet-config.js';
 import {
   enrichMappingsWithDropdownOptions,
@@ -39,7 +41,7 @@ import {
   getUniqueColumnValues,
 } from '../lib/field-mapper.js';
 import { FIELD_TAGS } from '../lib/constants.js';
-import { findExistingApplication } from '../lib/duplicates.js';
+import { findExistingApplication, rowFingerprint } from '../lib/duplicates.js';
 import {
   getConfiguredSheets,
   saveConfiguredSheets,
@@ -64,7 +66,8 @@ import {
   DESTRUCTIVE_WARNING,
   SCHEMA_OPS,
 } from '../lib/schema-editor.js';
-import { withSheetAccess } from './google-session.js';
+import { sheetsAccessError } from '../lib/google-auth.js';
+import { withSheetAccess, isPickerAvailable } from './google-session.js';
 
 /**
  * Build local tab configs from live sheet rows. Empty tabs get default headers
@@ -79,7 +82,19 @@ async function materializeTabs(spreadsheetId, rawTabs, existingTabs, token) {
       t.gid,
       t.rows
     );
-    const seeded = config.isNew;
+    // A header-only tab whose header already IS the current default layout
+    // (e.g. a fresh tracker with no jobs yet) needs no rewrite. Treating it as
+    // "seeded" would also throw away the user's local column choices (tags,
+    // dropdown options, ignored columns) on every refresh until the first save.
+    const alreadyDefault =
+      config.isNew &&
+      t.rows.length === 1 &&
+      config.headers.length === t.rows[0].length &&
+      config.headers.every(
+        (h, i) =>
+          String(h).trim().toLowerCase() === String(t.rows[0][i] ?? '').trim().toLowerCase()
+      );
+    const seeded = config.isNew && !alreadyDefault;
     if (seeded) {
       await seedTabHeaders(spreadsheetId, t.tabName, config.headers, token, {
         sheetId: t.sheetId ?? t.gid,
@@ -112,6 +127,51 @@ async function materializeTabs(spreadsheetId, rawTabs, existingTabs, token) {
   return tabs;
 }
 
+/** True when a Sheets API failure means "this app has no access to that file yet". */
+export function isAccessDeniedError(err) {
+  return err?.status === 403 || err?.status === 404;
+}
+
+/**
+ * Read a spreadsheet's tabs (seeding empty ones), build its config entry and
+ * upsert it into configuredSheets. Shared by add-by-URL, create and picker.
+ * Throws on API errors (with `.status`).
+ */
+async function connectSpreadsheet(spreadsheetId, url, token, { meta: knownMeta } = {}) {
+  const meta = knownMeta || (await fetchSpreadsheetMetadata(spreadsheetId, token));
+  const rawTabs = await loadSpreadsheetTabs(spreadsheetId, token);
+  const spreadsheetTitle = meta.properties?.title || `Sheet ${spreadsheetId.slice(0, 8)}…`;
+
+  const existing = (await getConfiguredSheets()).find((s) => s.spreadsheetId === spreadsheetId);
+  const tabs = await materializeTabs(spreadsheetId, rawTabs, existing?.tabs, token);
+
+  const sheetEntry = {
+    spreadsheetId,
+    url,
+    name: spreadsheetTitle,
+    tabs,
+    // Strictly increasing per sheet: refreshAllSheets uses it to spot a reconnect.
+    addedAt: Math.max(Date.now(), (existing?.addedAt || 0) + 1),
+  };
+
+  // Re-read: materializeTabs hits the network, so storage may have changed.
+  const next = [...(await getConfiguredSheets())];
+  const existingIndex = next.findIndex((s) => s.spreadsheetId === spreadsheetId);
+  if (existingIndex >= 0) {
+    next[existingIndex] = sheetEntry;
+  } else {
+    next.push(sheetEntry);
+  }
+
+  await saveConfiguredSheets(next);
+  return { sheet: sheetEntry, sheets: next };
+}
+
+export const NO_ACCESS_NEEDS_PICKER =
+  'Job Tracker could not open this spreadsheet. If the link is right, choose the spreadsheet with Google to give Job Tracker access.';
+export const NO_ACCESS_NO_PICKER =
+  'Job Tracker could not open this spreadsheet. Check the link is correct. It can only open spreadsheets it created. Use Create tracker sheet, or copy your data into a tracker sheet created by Job Tracker.';
+
 /** Connect a spreadsheet by URL: reads all tabs, seeds empty ones, stores config. */
 export async function addSheet(url) {
   const parsed = parseGoogleSheetUrl(url);
@@ -121,45 +181,97 @@ export async function addSheet(url) {
 
   try {
     return await withSheetAccess(async (token) => {
-      const meta = await fetchSpreadsheetMetadata(parsed.spreadsheetId, token);
-      const rawTabs = await loadSpreadsheetTabs(parsed.spreadsheetId, token);
-      const spreadsheetTitle =
-        meta.properties?.title || `Sheet ${parsed.spreadsheetId.slice(0, 8)}…`;
-
-      const existing = (await getConfiguredSheets()).find(
-        (s) => s.spreadsheetId === parsed.spreadsheetId
-      );
-      const tabs = await materializeTabs(
-        parsed.spreadsheetId,
-        rawTabs,
-        existing?.tabs,
-        token
-      );
-
-      const sheetEntry = {
-        spreadsheetId: parsed.spreadsheetId,
-        url: parsed.url,
-        name: spreadsheetTitle,
-        tabs,
-        addedAt: Date.now(),
-      };
-
-      // Re-read: materializeTabs hits the network, so storage may have changed.
-      const next = [...(await getConfiguredSheets())];
-      const existingIndex = next.findIndex(
-        (s) => s.spreadsheetId === parsed.spreadsheetId
-      );
-      if (existingIndex >= 0) {
-        next[existingIndex] = sheetEntry;
-      } else {
-        next.push(sheetEntry);
+      let meta;
+      try {
+        meta = await fetchSpreadsheetMetadata(parsed.spreadsheetId, token);
+      } catch (err) {
+        // Under drive.file, 403/404 means the user hasn't granted this file yet.
+        if (isAccessDeniedError(err)) {
+          if (await isPickerAvailable()) {
+            return {
+              success: false,
+              needsPicker: true,
+              spreadsheetId: parsed.spreadsheetId,
+              error: NO_ACCESS_NEEDS_PICKER,
+            };
+          }
+          return { success: false, error: NO_ACCESS_NO_PICKER };
+        }
+        throw err;
       }
-
-      await saveConfiguredSheets(next);
-      return { success: true, sheet: sheetEntry, sheets: next };
+      const result = await connectSpreadsheet(parsed.spreadsheetId, parsed.url, token, { meta });
+      return { success: true, ...result };
     });
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+/** Create a new tracker spreadsheet owned by the user and connect it. */
+export async function createTrackerSheet(title) {
+  try {
+    return await withSheetAccess(async (token) => {
+      const created = await createSpreadsheet(token, { title: title || undefined });
+      const url = created.spreadsheetUrl || buildSheetUrl(created.spreadsheetId);
+      const result = await connectSpreadsheet(created.spreadsheetId, url, token);
+      return { success: true, ...result, spreadsheetUrl: url };
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Connect spreadsheets chosen in the website Picker. Already-connected sheets
+ * are skipped unless they were flagged needsAccess (then they are re-granted). Resolves to { success, added, error? }; success is false if any
+ * file could not be opened.
+ */
+export async function addPickedSheets(files) {
+  // Outside the callback: withSheetAccess may re-run it after a 401, and sheets
+  // connected by the first attempt must still be counted.
+  let added = 0;
+  try {
+    return await withSheetAccess(async (token) => {
+      const configured = await getConfiguredSheets();
+      const have = new Set(configured.map((s) => s.spreadsheetId));
+      // A re-picked sheet that was flagged needsAccess is reconnected (which clears the flag).
+      const needsAccess = new Set(
+        configured.filter((s) => s.needsAccess).map((s) => s.spreadsheetId)
+      );
+      const failed = [];
+      for (const file of files) {
+        if (have.has(file.id) && !needsAccess.has(file.id)) continue;
+        try {
+          await connectSpreadsheet(file.id, buildSheetUrl(file.id), token);
+          have.add(file.id);
+          added += 1;
+        } catch (err) {
+          if (isAccessDeniedError(err)) {
+            failed.push(file.name || file.id);
+            continue;
+          }
+          // 401 must reach withSheetAccess so it can refresh the token and retry.
+          if (err?.status === 401 || added === 0) throw err;
+          // Offline/5xx after some sheets were already saved: report the partial
+          // result so the UI still refreshes instead of claiming nothing was added.
+          return {
+            success: false,
+            added,
+            error: sheetsAccessError(err?.message),
+          };
+        }
+      }
+      if (failed.length) {
+        return {
+          success: false,
+          added,
+          error: `Could not open: ${failed.join(', ')}. Make sure you selected it in the Google window.`,
+        };
+      }
+      return { success: true, added };
+    });
+  } catch (err) {
+    return { success: false, added, error: err.message };
   }
 }
 
@@ -238,8 +350,20 @@ export async function refreshAllSheets() {
     const updated = [];
 
     for (const sheet of sheets) {
-      const meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
-      const rawTabs = await loadSpreadsheetTabs(sheet.spreadsheetId, token);
+      let meta;
+      let rawTabs;
+      try {
+        meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
+        rawTabs = await loadSpreadsheetTabs(sheet.spreadsheetId, token);
+      } catch (err) {
+        // drive.file: sheets connected under the old broad scope may no longer
+        // be accessible. Keep the config, flag it, and refresh the rest.
+        if (isAccessDeniedError(err)) {
+          updated.push({ ...sheet, needsAccess: true });
+          continue;
+        }
+        throw err;
+      }
       const tabs = await materializeTabs(
         sheet.spreadsheetId,
         rawTabs,
@@ -253,12 +377,63 @@ export async function refreshAllSheets() {
           sheet.name ||
           `Sheet ${sheet.spreadsheetId.slice(0, 8)}…`,
         tabs,
+        needsAccess: false,
       });
     }
 
-    await saveConfiguredSheets(updated);
-    return { success: true, sheets: updated };
+    // The loop above made many network calls. Merge into the latest stored
+    // list so a sheet added, removed or renamed meanwhile is not undone.
+    // A sheet reconnected meanwhile (e.g. re-granted via the Picker, which
+    // stamps a new addedAt) is newer than this refresh's read: keep it.
+    const startedWith = new Map(sheets.map((s) => [s.spreadsheetId, s.addedAt]));
+    const byId = new Map(updated.map((s) => [s.spreadsheetId, s]));
+    // Schema edits (headers/mappings) made while we were reading win over the
+    // refreshed copy of the same tab, which was derived from the older config.
+    const schemaOf = (t) => JSON.stringify([t.headers, t.mappings, t.isNew]);
+    const startSchemas = new Map(
+      sheets.flatMap((sh) =>
+        (sh.tabs || []).map((t) => [`${sh.spreadsheetId}:${t.gid}`, schemaOf(t)])
+      )
+    );
+    const merged = (await getConfiguredSheets()).map((s) => {
+      if (startedWith.get(s.spreadsheetId) !== s.addedAt) return s;
+      const fresh = byId.get(s.spreadsheetId);
+      if (!fresh) return s;
+      const tabs = (fresh.tabs || []).map((t) => {
+        const key = `${s.spreadsheetId}:${t.gid}`;
+        const cur = (s.tabs || []).find((c) => String(c.gid) === String(t.gid));
+        if (cur && startSchemas.has(key) && schemaOf(cur) !== startSchemas.get(key)) {
+          return { ...t, headers: cur.headers, mappings: cur.mappings, isNew: cur.isNew };
+        }
+        return t;
+      });
+      return { ...fresh, tabs };
+    });
+    await saveConfiguredSheets(merged);
+    return { success: true, sheets: merged };
   });
+}
+
+/**
+ * Persist one tab's schema (headers, mappings, isNew and any refreshed column
+ * caches) into the LATEST stored sheets. The schema handlers make network calls
+ * between reading and writing, so saving their original snapshot would undo a
+ * concurrent refresh, rename or save. Resolves to the latest sheets list.
+ */
+async function commitTabSchema(spreadsheetId, srcTab) {
+  const latest = await getConfiguredSheets();
+  const dest = latest
+    .find((s) => s.spreadsheetId === spreadsheetId)
+    ?.tabs?.find((t) => String(t.gid) === String(srcTab.gid));
+  if (dest) {
+    dest.headers = srcTab.headers;
+    dest.mappings = srcTab.mappings;
+    dest.isNew = srcTab.isNew;
+    if (srcTab.columnUniques) dest.columnUniques = srcTab.columnUniques;
+    if (srcTab.rowCount != null) dest.rowCount = srcTab.rowCount;
+    await saveConfiguredSheets(latest);
+  }
+  return latest;
 }
 
 /**
@@ -303,7 +478,11 @@ async function runSheetPlan(spreadsheetId, tab, plan, headers, token) {
  * headers to Google when the change is structural, and record an undo entry.
  * Destructive ops require `confirmed: true` (otherwise `needsConfirmation`).
  */
-export async function applySchemaChangeMessage(message) {
+export function applySchemaChangeMessage(message) {
+  return serializeByKey(SCHEMA_QUEUE_KEY, () => applySchemaChangeMessageNow(message));
+}
+
+async function applySchemaChangeMessageNow(message) {
   const {
     spreadsheetId,
     tabId,
@@ -403,11 +582,11 @@ export async function applySchemaChangeMessage(message) {
   await saveUndoStack(stack);
   // New edits invalidate redo history.
   await saveRedoStack([]);
-  await saveConfiguredSheets(sheets);
+  const latestSheets = await commitTabSchema(spreadsheetId, tab);
 
   return {
     success: true,
-    sheets,
+    sheets: latestSheets,
     undoEntry: entry,
     stack,
     redoStack: [],
@@ -505,7 +684,11 @@ export async function syncTabColumnUniques(message) {
 }
 
 /** Revert a schema change (latest, or a specific entry id) and move it to the redo stack. */
-export async function undoSchemaChange(entryId) {
+export function undoSchemaChange(entryId) {
+  return serializeByKey(SCHEMA_QUEUE_KEY, () => undoSchemaChangeNow(entryId));
+}
+
+async function undoSchemaChangeNow(entryId) {
   const stack = await getUndoStack();
   let entry = null;
   let nextStack = stack;
@@ -559,11 +742,11 @@ export async function undoSchemaChange(entryId) {
   const redoStack = pushRedo(await getRedoStack(), entry);
   await saveUndoStack(nextStack);
   await saveRedoStack(redoStack);
-  await saveConfiguredSheets(sheets);
+  const latestSheets = await commitTabSchema(entry.spreadsheetId, tab);
 
   return {
     success: true,
-    sheets,
+    sheets: latestSheets,
     stack: nextStack,
     redoStack,
     restored: entry,
@@ -572,7 +755,11 @@ export async function undoSchemaChange(entryId) {
 }
 
 /** Re-apply a previously undone schema change. */
-export async function redoSchemaChange(entryId) {
+export function redoSchemaChange(entryId) {
+  return serializeByKey(SCHEMA_QUEUE_KEY, () => redoSchemaChangeNow(entryId));
+}
+
+async function redoSchemaChangeNow(entryId) {
   const stack = await getRedoStack();
   let entry = null;
   let nextRedo = stack;
@@ -626,11 +813,11 @@ export async function redoSchemaChange(entryId) {
   const undoStack = pushUndo(await getUndoStack(), entry);
   await saveUndoStack(undoStack);
   await saveRedoStack(nextRedo);
-  await saveConfiguredSheets(sheets);
+  const latestSheets = await commitTabSchema(entry.spreadsheetId, tab);
 
   return {
     success: true,
-    sheets,
+    sheets: latestSheets,
     stack: undoStack,
     redoStack: nextRedo,
     restored: entry,
@@ -657,7 +844,9 @@ async function* iterateTabsWithRows(token, sheets, preferred = []) {
     try {
       const meta = await fetchSpreadsheetMetadata(sheet.spreadsheetId, token);
       metaSheets = meta.sheets ?? [];
-    } catch {
+    } catch (err) {
+      // An expired token must reach withSheetAccess so it can refresh and retry.
+      if (err?.status === 401) throw err;
       continue;
     }
     const isPreferred = (entry) =>
@@ -677,7 +866,8 @@ async function* iterateTabsWithRows(token, sheets, preferred = []) {
         rows = await loadTabRows(sheet.spreadsheetId, tabName, token, {
           valueRenderOption: 'FORMULA',
         });
-      } catch {
+      } catch (err) {
+        if (err?.status === 401) throw err;
         rows = [];
       }
       yield {
@@ -720,17 +910,62 @@ export async function findApplication(extractedData = {}, preferredDestinations 
   }
 }
 
+const ROW_CHANGED_ERROR =
+  'This row changed in Google Sheets. Reopen Job Tracker on this page to reload it.';
+
+/** Fingerprint of the row as currently stored (read errors propagate). */
+async function readRowFingerprint(spreadsheetId, tabName, rowIndex, token) {
+  const row = await loadRow(spreadsheetId, tabName, rowIndex, token);
+  return rowFingerprint(row);
+}
+
+/**
+ * Same, but best effort: used after a write succeeded, where a failed read
+ * must not turn a saved row into a reported failure (the user would retry and
+ * add a duplicate). null just disables the changed-row check for that row.
+ */
+async function tryReadRowFingerprint(spreadsheetId, tabName, rowIndex, token) {
+  try {
+    return await readRowFingerprint(spreadsheetId, tabName, rowIndex, token);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Append (or update, when `existingRowIndex` is given) a job row in one tab.
  * Refuses to add a duplicate to the same tab unless updating.
  */
-export async function saveJob(message) {
+export function saveJob(message) {
+  // Serialize per tab: a double-click or two panels saving the same job must
+  // not both pass the duplicate check and then both append.
+  return serializeByKey(`${message?.spreadsheetId}:${message?.tabId}`, () => saveJobNow(message));
+}
+
+/** All schema edits/undo/redo share one queue: each is read-modify-write on the same tab config. */
+const SCHEMA_QUEUE_KEY = 'schema-edits';
+
+/** Run `task` after every earlier task with the same key has settled. */
+const keyQueues = new Map();
+function serializeByKey(key, task) {
+  const prev = keyQueues.get(key) || Promise.resolve();
+  const run = prev.then(task);
+  const tail = run.catch(() => {});
+  keyQueues.set(key, tail);
+  tail.then(() => {
+    if (keyQueues.get(key) === tail) keyQueues.delete(key);
+  });
+  return run;
+}
+
+async function saveJobNow(message) {
   const {
     spreadsheetId,
     tabId,
     extractedData,
     userInputs,
     existingRowIndex = null,
+    expectedFingerprint = null,
   } = message;
 
   return withSheetAccess(async (token) => {
@@ -793,23 +1028,29 @@ export async function saveJob(message) {
 
     if (updating) {
       const rowIndex = Number(existingRowIndex);
-      if (rowIndex === 0 && rows.length && String(rows[0]?.[0] || '').trim()) {
-        // Never overwrite the header row.
-        const headerish = tab.headers?.[0];
-        if (
-          headerish &&
-          String(rows[0][0]).trim().toLowerCase() ===
-            String(headerish).trim().toLowerCase()
-        ) {
-          return { success: false, error: 'Cannot update the header row.' };
+      if (rowIndex === 0) {
+        // Row 0 is always the header row: never overwrite it.
+        return { success: false, error: 'Cannot update the header row.' };
+      }
+      if (expectedFingerprint != null) {
+        // `rows` was just read with FORMULA, same as the fingerprint source.
+        if (rowFingerprint(rows[rowIndex]) !== expectedFingerprint) {
+          return { success: false, code: 'ROW_CHANGED', error: ROW_CHANGED_ERROR };
         }
       }
       await updateJobInTab(spreadsheetId, tab.tabName, rowIndex, row, token);
+      const newFingerprint = await tryReadRowFingerprint(
+        spreadsheetId,
+        tab.tabName,
+        rowIndex,
+        token
+      );
       return {
         success: true,
         updated: true,
         row,
         rowIndex,
+        rowFingerprint: newFingerprint,
         spreadsheetId,
         tabId: tab.gid,
         tabName: tab.tabName,
@@ -838,11 +1079,16 @@ export async function saveJob(message) {
     }
 
     const rowIndex = rowIndexFromUpdatedRange(appendRes?.updates?.updatedRange);
+    const newFingerprint =
+      rowIndex != null
+        ? await tryReadRowFingerprint(spreadsheetId, tab.tabName, rowIndex, token)
+        : null;
 
     return {
       success: true,
       row,
       rowIndex,
+      rowFingerprint: newFingerprint,
       spreadsheetId,
       tabId: tab.gid,
       tabName: tab.tabName,
@@ -855,7 +1101,7 @@ export async function saveJob(message) {
  * Delete an existing application row from a connected sheet tab.
  */
 export async function deleteJob(message) {
-  const { spreadsheetId, tabId, rowIndex } = message;
+  const { spreadsheetId, tabId, rowIndex, expectedFingerprint = null } = message;
   const index = Number(rowIndex);
 
   if (!spreadsheetId || tabId == null) {
@@ -878,6 +1124,18 @@ export async function deleteJob(message) {
         (t) => String(t.gid) === String(tabId) || String(t.tabId) === String(tabId)
       );
       if (!tab) return { success: false, error: 'Tab not found' };
+
+      if (expectedFingerprint != null) {
+        const current = await readRowFingerprint(
+          spreadsheetId,
+          tab.tabName,
+          index,
+          token
+        );
+        if (current !== expectedFingerprint) {
+          return { success: false, code: 'ROW_CHANGED', error: ROW_CHANGED_ERROR };
+        }
+      }
 
       const sheetIdForApi = tab.sheetId ?? tab.gid;
       await deleteJobRowInTab(spreadsheetId, sheetIdForApi, index, token);
