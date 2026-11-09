@@ -24,7 +24,7 @@ Triggers include (not exhaustive):
 - New/renamed/removed `chrome.runtime` message types
 - New `background/*.js` module or a duty moved between modules
 - Content / side panel / options / connect behavior changes
-- Auth, Sheets, extract/preload, or storage-key changes
+- Auth, Sheets, Picker bridge, extract/preload, or storage-key changes
 - Updates to [separation-of-duty](../separation-of-duty/SKILL.md) architecture map
 
 Skip only for pure refactors with **identical** external behavior and message
