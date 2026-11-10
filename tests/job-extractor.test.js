@@ -350,3 +350,28 @@ describe('title / company cleaning', () => {
     expect(extractJobData(parseHtml(html, url), url).company).toBe('Stripe');
   });
 });
+
+describe('round 3 extractor regressions', () => {
+  test('JSON-LD addressCountry given as a Country object is not "[object Object]"', () => {
+    const html = `<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer",
+      "hiringOrganization":{"name":"Acme"},
+      "jobLocation":{"@type":"Place","address":{"@type":"PostalAddress","addressLocality":"Austin",
+      "addressRegion":"TX","addressCountry":{"@type":"Country","name":"US"}}}}</script><body><h1>Engineer</h1></body>`;
+    const data = extractJobData(parseHtml(html, 'https://acme.example/jobs/engineer-123456'), 'https://acme.example/jobs/engineer-123456');
+    expect(data.location).toBe('Austin, TX, US');
+  });
+
+  test('a SmartRecruiters company listing page (no posting segment) is not a job page', () => {
+    expect(isLikelyJobPage('https://jobs.smartrecruiters.com/AcmeCorp', null)).toBe(false);
+    expect(isLikelyJobPage('https://jobs.smartrecruiters.com/AcmeCorp/743999-backend-engineer', null)).toBe(true);
+  });
+
+  test('a canonical link on a spoofed host cannot override the saved URL', () => {
+    // The markup hint routes this non-LinkedIn page to the LinkedIn collector.
+    const html = `<html><head><link rel="canonical" href="https://evil.example/jobs/view/123456789"></head>
+      <body><div class="jobs-unified-top-card"><h1>Engineer</h1></div></body></html>`;
+    const url = 'https://acme.example/careers/1';
+    const data = extractJobData(parseHtml(html, url), url);
+    expect(data.url).toBe(url);
+  });
+});

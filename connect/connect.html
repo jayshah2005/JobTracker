@@ -3,15 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Connect Google — Job Tracker</title>
+    <title>Job Tracker — Connect Google</title>
     <link rel="icon" href="../icons/icon32.png" type="image/png" />
+    <link rel="stylesheet" href="../lib/tokens.css" />
+    <link rel="stylesheet" href="../lib/ui.css" />
     <link rel="stylesheet" href="connect.css" />
   </head>
   <body>
     <header class="hero">
-      <div class="brand">
-        <img class="brand-logo" src="../icons/logo.png" width="40" height="40" alt="" />
-        <span>Job Tracker</span>
+      <div class="jt-brand">
+        <img src="../icons/logo.png" width="28" height="28" alt="" />
+        <span class="jt-brand-name">Job Tracker</span>
       </div>
       <h1 id="hero-title">Connect Google</h1>
       <p class="lede" id="hero-lede">
@@ -24,8 +26,8 @@
 
       <section class="intro" id="default-intro">
         <p id="default-intro-text">
-          Job Tracker uses Google sign-in to write rows into <strong>your</strong> spreadsheets.
-          Use the same Google account that can edit those sheets.
+          Job Tracker saves applications to <strong>your</strong> Google Sheets.
+          It only accesses sheets it creates or you choose.
         </p>
       </section>
 
@@ -33,8 +35,7 @@
         <li class="step" id="sign-in-panel-default">
           <h2>Sign in with Google</h2>
           <p id="sign-in-help">
-            Sign in with the account that can edit your job tracker spreadsheet.
-            Then paste a sheet link that account can edit in the side panel or Settings.
+            Sign in, then create a tracker sheet or choose one from Google Drive.
           </p>
           <div id="signed-out-default">
             <button type="button" class="btn btn-primary" id="sign-in-btn">
@@ -42,9 +43,18 @@
             </button>
           </div>
           <div id="signed-in-default" class="hidden">
-            <p class="connected">Google is connected. Close this tab, then paste a sheet link in the Job Tracker side panel (or Settings).</p>
+            <p class="connected">Google is connected.</p>
             <button type="button" class="btn btn-secondary" id="sign-out-btn">Sign out</button>
           </div>
+        </li>
+        <li class="step hidden" id="sheet-step">
+          <h2>Add your tracker sheet</h2>
+          <p id="access-note">Job Tracker only accesses sheets it creates or you choose.</p>
+          <div class="step-actions">
+            <button type="button" class="btn btn-primary" id="create-sheet-btn">Create tracker sheet</button>
+            <button type="button" class="btn btn-secondary" id="choose-sheet-btn">Choose from Google Drive</button>
+          </div>
+          <p id="picker-hint" class="note hidden" role="status" aria-live="polite"></p>
         </li>
       </ol>
 
@@ -59,18 +69,18 @@
 
           <ol class="steps steps-nested" id="byo-steps">
             <li class="step">
-              <h2>Enable the Sheets API</h2>
-              <p>This lets your Google Cloud project talk to Google Sheets.</p>
+              <h2>Enable the Drive API</h2>
+              <p>This lets your Google Cloud project create and open your tracker sheet.</p>
               <a
                 class="btn btn-secondary"
-                href="https://console.cloud.google.com/apis/library/sheets.googleapis.com"
+                href="https://console.cloud.google.com/apis/library/drive.googleapis.com"
                 target="_blank"
                 rel="noopener"
-              >Open Google Sheets API</a>
+              >Open Google Drive API</a>
               <ol class="how">
-                <li>Sign in with the Google account that will own your job tracker spreadsheet (and can edit it).</li>
+                <li>Sign in with the Google account you will use for Job Tracker.</li>
                 <li>If Google asks you to create or choose a project, create one and name it something clear, like Job Tracker.</li>
-                <li>On the Google Sheets API page, click <strong>Enable</strong>.</li>
+                <li>On the Google Drive API page, click <strong>Enable</strong>. Also enable the <a href="https://console.cloud.google.com/apis/library/sheets.googleapis.com" target="_blank" rel="noopener">Google Sheets API</a> the same way.</li>
                 <li>When it finishes, return to this tab and continue.</li>
               </ol>
             </li>
@@ -234,10 +244,17 @@
         </details>
 
         <details class="problem">
-          <summary>Signed in, but Job Tracker can’t edit the spreadsheet</summary>
+          <summary>Job Tracker can’t find or open my sheet</summary>
           <div class="problem-body">
-            <p><strong>Cause:</strong> The signed-in Google account is not an editor on that sheet.</p>
-            <p><strong>Fix:</strong> Open the spreadsheet in Google Sheets → Share → give that same account Editor access. Or sign out and sign in with an account that already can edit it.</p>
+            <p><strong>Cause:</strong> Job Tracker only accesses sheets it created or you chose. Sheets that are only shared with you, or pasted by link, need access granted first.</p>
+            <p><strong>Fix:</strong> Use <strong>Choose from Google Drive</strong> and pick the sheet, or click <strong>Create tracker sheet</strong> for a new one.</p>
+          </div>
+        </details>
+
+        <details class="problem">
+          <summary>Google asks me to “see, edit, create, and delete” Drive files</summary>
+          <div class="problem-body">
+            <p><strong>Why:</strong> The consent text reads “See, edit, create, and delete only the specific Google Drive files you use with this app.” It is limited to sheets Job Tracker created or you chose. It cannot see the rest of your Drive.</p>
           </div>
         </details>
 

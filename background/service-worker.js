@@ -15,6 +15,7 @@ import {
 } from './google-session.js';
 import {
   addSheet,
+  createTrackerSheet,
   removeSheet,
   refreshAllSheets,
   applySchemaChangeMessage,
@@ -26,6 +27,7 @@ import {
   deleteJob,
   renameTab,
 } from './sheets-orchestrator.js';
+import { handlePickerExternalMessage, openPicker } from './picker-messages.js';
 import {
   getConfiguredSheets,
   getSettings,
@@ -45,6 +47,15 @@ import {
 } from './page-job-data.js';
 
 registerSidePanel();
+
+// Messages from the website Picker page (externally_connectable).
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  handlePickerExternalMessage(message, sender).then(sendResponse).catch((err) => {
+    console.error('External message failed:', err);
+    sendResponse({ success: false, added: 0, error: 'Something went wrong. Please try again.' });
+  });
+  return true;
+});
 registerJobPreloadLifecycle();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -79,6 +90,10 @@ async function handleMessage(message, sender) {
       return { success: true, settings: await getSettings() };
     case 'ADD_SHEET':
       return addSheet(message.url);
+    case 'CREATE_SHEET':
+      return createTrackerSheet(message.title);
+    case 'OPEN_PICKER':
+      return openPicker(message.spreadsheetId);
     case 'REMOVE_SHEET':
       return removeSheet(message.spreadsheetId);
     case 'RENAME_SHEET_TAB':

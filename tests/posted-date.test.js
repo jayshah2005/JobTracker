@@ -76,3 +76,27 @@ describe('body text scanning', () => {
     expect(run('<main><h1>Engineer</h1><p>Our recruiter responded 3 days ago to everyone.</p></main>')).toBe('');
   });
 });
+
+describe('relative dates across a DST change', () => {
+  const realTz = process.env.TZ;
+  afterEach(() => {
+    if (realTz === undefined) delete process.env.TZ;
+    else process.env.TZ = realTz;
+  });
+
+  test('"yesterday" / "N days ago" are calendar days even when a day has 23 hours', () => {
+    process.env.TZ = 'America/Los_Angeles'; // DST began 2024-03-10 at 02:00
+    const now = new Date(2024, 2, 11, 0, 30, 0); // 00:30 the day after
+    expect(normalizeDate('yesterday', now)).toBe('2024-03-10');
+    expect(normalizeDate('1 day ago', now)).toBe('2024-03-10');
+    expect(normalizeDate('3 days ago', now)).toBe('2024-03-08');
+    expect(normalizeDate('1 week ago', now)).toBe('2024-03-04');
+  });
+
+  test('and when a day has 25 hours (DST ends)', () => {
+    process.env.TZ = 'America/Los_Angeles'; // DST ended 2024-11-03
+    const now = new Date(2024, 10, 4, 23, 30, 0);
+    expect(normalizeDate('1 day ago', now)).toBe('2024-11-03');
+    expect(normalizeDate('2 days ago', now)).toBe('2024-11-02');
+  });
+});

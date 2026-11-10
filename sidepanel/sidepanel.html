@@ -4,19 +4,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Job Tracker</title>
+    <title>Job Tracker — Side panel</title>
     <link rel="icon" href="../icons/icon32.png" type="image/png" />
+    <link rel="stylesheet" href="../lib/tokens.css" />
+    <link rel="stylesheet" href="../lib/ui.css" />
     <link rel="stylesheet" href="sidepanel.css" />
     <link rel="stylesheet" href="../lib/dialog.css" />
   </head>
   <body>
     <header class="sp-header">
-      <div class="sp-brand">
-        <img class="sp-logo" src="../icons/logo.png" width="24" height="24" alt="" />
-        <span class="sp-brand-name">Job Tracker</span>
+      <div class="jt-brand">
+        <img src="../icons/logo.png" width="28" height="28" alt="" />
+        <span class="jt-brand-name">Job Tracker</span>
       </div>
       <div class="sp-header-actions">
-        <span id="auth-pill" class="auth-pill hidden">Google connected</span>
+        <span id="auth-pill" class="auth-pill hidden" title="Google account connected">Connected</span>
         <button type="button" class="sp-settings-btn" id="open-options" title="Settings" aria-label="Settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25">
             <circle cx="12" cy="12" r="3" />
@@ -59,22 +61,27 @@
           <p id="signin-copy">Sign in with Google once. That account is used for every spreadsheet you add.</p>
           <button type="button" class="btn btn-primary" id="sign-in-btn">Sign in with Google</button>
           <button type="button" class="btn btn-secondary" id="open-connect-btn">Set up Google</button>
-          <p id="signin-help" class="signin-help">
-            First time? Open the <a href="#" id="open-connect-help">Google setup guide</a> and follow the steps.
-          </p>
         </div>
       </div>
 
       <div id="setup-view" class="sp-view hidden">
         <div class="empty-state card">
-          <p>Google is connected. Paste a link to a Google Sheet this account can edit, and Job Tracker will save jobs there.</p>
-          <label class="sr-only" for="setup-sheet-url">Google Sheet link</label>
-          <input
-            type="url"
-            id="setup-sheet-url"
-            placeholder="https://docs.google.com/spreadsheets/d/..."
-          />
-          <button type="button" class="btn btn-primary" id="add-sheet-btn">Add sheet</button>
+          <p>Google is connected. Create a tracker sheet, or choose one you already have.</p>
+          <button type="button" class="btn btn-primary" id="create-sheet-btn">Create tracker sheet</button>
+          <button type="button" class="btn btn-secondary" id="choose-sheet-btn">Choose from Google Drive</button>
+          <p id="picker-hint" class="field-hint hidden" role="status" aria-live="polite"></p>
+          <p id="access-note" class="field-hint">Job Tracker only accesses sheets it creates or you choose.</p>
+          <details class="paste-link">
+            <summary>Or paste a sheet link</summary>
+            <label class="sr-only" for="setup-sheet-url">Google Sheet link</label>
+            <input
+              type="url"
+              id="setup-sheet-url"
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+            />
+            <button type="button" class="btn btn-secondary" id="add-sheet-btn">Add sheet</button>
+            <button type="button" class="btn btn-primary hidden" id="grant-sheet-btn">Grant access to this sheet</button>
+          </details>
         </div>
       </div>
 
@@ -84,7 +91,7 @@
           <p id="applied-summary" class="applied-summary"></p>
           <p id="applied-meta" class="field-hint"></p>
           <div class="applied-actions">
-            <button type="button" class="btn btn-primary-outline" id="edit-existing-btn">
+            <button type="button" class="btn btn-primary" id="edit-existing-btn">
               Edit application
             </button>
             <button type="button" class="btn btn-danger-outline" id="delete-existing-btn">
@@ -117,6 +124,8 @@
           </div>
           <a class="job-card-link" id="job-url" href="#" target="_blank" rel="noopener noreferrer"></a>
         </section>
+
+        <div id="needs-access" class="needs-access hidden"></div>
 
         <section id="destination-section" class="panel-card hidden">
           <div class="panel-card-header">
@@ -171,7 +180,7 @@
         </section>
 
         <div class="sp-footer">
-          <button type="button" class="btn btn-primary-outline" id="save-btn">
+          <button type="button" class="btn btn-primary" id="save-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
               <path d="M17 21v-8H7v8" />

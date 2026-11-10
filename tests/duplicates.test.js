@@ -113,7 +113,7 @@ describe('findExistingApplication', () => {
           [
             '2026-01-10',
             'REQ-998877',
-            'Edited Co',
+            'Acme Inc.',
             '=HYPERLINK("https://old-ats.example.com/archived/xyz","Edited Role")',
             'NYC',
             'Applied',
@@ -250,5 +250,100 @@ describe('URL / id normalisation edge cases', () => {
     expect(
       urlsMatch('https://uk.indeed.com/viewjob?jk=abc123def456&from=serp', 'https://uk.indeed.com/rc/clk?jk=abc123def456')
     ).toBe(true);
+  });
+});
+
+describe('cross-employer job id collisions', () => {
+  const mappings = [
+    { columnIndex: 0, header: 'Company Name', tag: 'company_name' },
+    { columnIndex: 1, header: 'Job ID', tag: 'id' },
+    { columnIndex: 2, header: 'Role', tag: 'role' },
+  ];
+  const tab = (rows) => [{ sheetName: 'S', tabName: 'T', spreadsheetId: 's', gid: '0', mappings, rows }];
+
+  test('workday requisition ids on different tenants do not match by URL id', () => {
+    expect(
+      urlsMatch(
+        'https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/NYC/Engineer_R-1234',
+        'https://globex.wd1.myworkdayjobs.com/Jobs/job/SF/Analyst_R-1234'
+      )
+    ).toBe(false);
+  });
+});
+
+describe('rowFingerprint', () => {
+  test('ignores trailing empties and stringifies cells', async () => {
+    const { rowFingerprint } = await import('../lib/duplicates.js');
+    expect(rowFingerprint(['a', 5, '', ''])).toBe(rowFingerprint(['a', '5']));
+    expect(rowFingerprint(['a', '', 'b'])).not.toBe(rowFingerprint(['a', 'b']));
+    expect(rowFingerprint(undefined)).toBe(rowFingerprint([]));
+  });
+});
+
+describe('job-id match guarded by company', () => {
+  const mappings = buildDefaultMappings();
+  const header = mappings.map((m) => m.header);
+  const mk = (company) => [
+    {
+      sheetName: 'T', tabName: 'J', spreadsheetId: 's', gid: '0', mappings,
+      rows: [
+        header,
+        ['2026-01-10', '98765', company, '=HYPERLINK("https://boards.example.com/a/jobs/98765","Role")', '', 'Applied', ''],
+      ],
+    },
+  ];
+  const job = (company, url) => ({ company, url, jobId: '98765' });
+
+  test('same id, clearly different company: no match', () => {
+    const res = findExistingApplication(
+      mk('Globex'),
+      job('Initech Systems', 'https://boards.example.com/b/jobs/98765?x=1')
+    );
+    expect(res.matched).toBe(false);
+  });
+
+  test('same id, shortened/edited company still matches', () => {
+    const res = findExistingApplication(
+      mk('Acme Inc'),
+      job('Acme', 'https://boards.example.com/b/jobs/98765?x=1')
+    );
+    expect(res.matched).toBe(true);
+  });
+
+  test('same id, missing company on page still matches', () => {
+    const res = findExistingApplication(
+      mk('Globex'),
+      job('', 'https://boards.example.com/b/jobs/98765?x=1')
+    );
+    expect(res.matched).toBe(true);
+  });
+
+  test('identical URL matches even when company differs', () => {
+    const res = findExistingApplication(
+      mk('Globex'),
+      job('Initech', 'https://boards.example.com/a/jobs/98765')
+    );
+    expect(res.matched).toBe(true);
+    expect(res.matchedBy).toBe('url');
+  });
+});
+
+describe('matching rows stored with a text marker', () => {
+  test("'-Senior role and '=x company still match", () => {
+    const mappings = buildDefaultMappings();
+    const col = (tag) => mappings.find((m) => (m.tag || m.fieldTag) === tag || m.tag === tag)?.columnIndex;
+    const header = mappings.map((m) => m.header);
+    const companyCol = mappings.findIndex((m) => /company/i.test(m.header));
+    const roleCol = mappings.findIndex((m) => /role|title/i.test(m.header));
+    const row = header.map(() => '');
+    row[companyCol] = "'=Acme";
+    row[roleCol] = "'-Senior role";
+    const res = findExistingApplication(
+      [{ sheetName: 'S', tabName: 'T', spreadsheetId: 's', gid: '1', mappings, rows: [header, row] }],
+      { company: '=Acme', role: '-Senior role' }
+    );
+    expect(res.matched).toBe(true);
+    expect(res.matchedBy).toBe('company_role');
+    void col;
   });
 });

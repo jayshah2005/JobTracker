@@ -25,7 +25,7 @@ describe('findApplication', () => {
   beforeEach(async () => {
     _resetMemoryStore();
     await saveOAuthClientId('abc.apps.googleusercontent.com');
-    await saveGoogleToken({ accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() + 3600_000 });
+    await saveGoogleToken({ accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() + 3600_000, scope: 'https://www.googleapis.com/auth/drive.file' });
     await saveConfiguredSheets([cfg('A', [1, 2]), cfg('B', [3, 4])]);
     calls = [];
     // Only B/Tab4 holds the job.

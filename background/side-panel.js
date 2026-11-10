@@ -10,6 +10,11 @@ const SIDE_PANEL_PATH = 'sidepanel/sidepanel.html';
 /** Tabs where the user explicitly opened the sidebar. */
 const sidePanelEnabledTabs = new Set();
 
+/**
+ * Without the `tabs` permission tab.url is only visible for pages matched by
+ * host_permissions (http/https); chrome://, the Web Store etc. report no url,
+ * which we treat as panelable (the panel then just shows "no job data").
+ */
 function isSidePanelableUrl(url) {
   if (!url) return true;
   return /^https?:/i.test(url) || url.startsWith('file:');
@@ -123,9 +128,19 @@ export function registerSidePanel() {
     sidePanelEnabledTabs.delete(tabId);
   });
 
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (!sidePanelEnabledTabs.has(tabId)) return;
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (!(changeInfo.status === 'complete' || changeInfo.url)) return;
+    if (!sidePanelEnabledTabs.has(tabId)) {
+      // The worker may have been suspended since the panel was opened, which
+      // empties the in-memory set. Chrome keeps the per-tab options, so recover.
+      try {
+        const opts = await chrome.sidePanel?.getOptions?.({ tabId });
+        if (!opts?.enabled) return;
+        sidePanelEnabledTabs.add(tabId);
+      } catch {
+        return;
+      }
+    }
     const url = tab?.url || changeInfo.url;
     if (!isSidePanelableUrl(url)) {
       disableSidePanelForTab(tabId);

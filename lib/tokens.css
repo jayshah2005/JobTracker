@@ -1,0 +1,115 @@
+/*
+ * Job Tracker design tokens — the single source of truth for colour, type, radius, spacing and shadow.
+ * Loaded by the side panel, Settings, connect page, picker, and the public site (index.html, privacy.html,
+ * which are served from the repo root so they can <link> this same file). Brand: lavender logo tile
+ * (#afa0ee) + slate briefcase (#2e3b48); primary is the deeper indigo that reads on white with AA contrast.
+ * Contrast (WCAG AA): --jt-on-primary on --jt-primary 6.3:1 light / 4.6:1 dark; each *-fg on its *-bg >= 4.5:1.
+ * The floating launcher (content/floating-panel.css) runs inside host pages and cannot load this file, so it
+ * hard-codes the same light values; keep it in sync by hand.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Brand */
+  --jt-brand-lavender: #afa0ee;
+  --jt-brand-slate: #2e3b48;
+
+  /* Primary (actions, links, focus) */
+  --jt-primary: #4f46e5;
+  --jt-primary-hover: #4338ca;
+  --jt-primary-text: #4338ca; /* primary used as text/link on surfaces */
+  --jt-primary-soft: #eef2ff; /* tinted fill */
+  --jt-primary-soft-border: #c7d2fe;
+  --jt-on-primary: #ffffff;
+
+  /* Surfaces and text */
+  --jt-bg: #f6f7fb;
+  --jt-card: #ffffff;
+  --jt-sunken: #f1f2f8; /* table headers, tab strips, hover fills */
+  --jt-border: #dfe2ec;
+  --jt-border-strong: #c4c9d8;
+  --jt-text: #1f2433;
+  --jt-muted: #5b6475;
+  --jt-overlay: rgba(15, 18, 30, 0.5);
+
+  /* Status colours: solid + (bg, fg, border) trios */
+  --jt-danger: #dc2626;
+  --jt-danger-bg: #fef2f2;
+  --jt-danger-fg: #b91c1c;
+  --jt-danger-border: #fecaca;
+  --jt-success: #059669;
+  --jt-success-bg: #ecfdf5;
+  --jt-success-fg: #047857;
+  --jt-success-border: #a7f3d0;
+  --jt-warning-bg: #fffbeb;
+  --jt-warning-fg: #92400e;
+  --jt-warning-border: #fcd34d;
+  --jt-info-bg: var(--jt-primary-soft);
+  --jt-info-fg: #4338ca;
+  --jt-info-border: var(--jt-primary-soft-border);
+
+  /* Type */
+  --jt-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --jt-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --jt-text-xs: 11px;
+  --jt-text-sm: 12px;
+  --jt-text-md: 13px;
+  --jt-text-lg: 15px;
+
+  /* Radius */
+  --jt-radius-sm: 6px;
+  --jt-radius: 8px;
+  --jt-radius-lg: 12px;
+  --jt-radius-pill: 999px;
+
+  /* Spacing scale */
+  --jt-space-1: 4px;
+  --jt-space-2: 8px;
+  --jt-space-3: 12px;
+  --jt-space-4: 16px;
+  --jt-space-5: 20px;
+  --jt-space-6: 24px;
+
+  /* Shadow and focus */
+  --jt-shadow-sm: 0 1px 2px rgba(15, 18, 30, 0.06);
+  --jt-shadow-md: 0 8px 20px rgba(15, 18, 30, 0.12);
+  --jt-shadow-lg: 0 20px 50px rgba(15, 18, 30, 0.3);
+  --jt-focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.25);
+  --jt-focus-outline: 2px solid var(--jt-primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --jt-primary: #6a61ee;
+    --jt-primary-hover: #5d54e0;
+    --jt-primary-text: #b4afff;
+    --jt-primary-soft: #25264a;
+    --jt-primary-soft-border: #41438f;
+
+    --jt-bg: #14151d;
+    --jt-card: #1c1e29;
+    --jt-sunken: #232636;
+    --jt-border: #333748;
+    --jt-border-strong: #4a4f66;
+    --jt-text: #eceef6;
+    --jt-muted: #a3a9bc;
+    --jt-overlay: rgba(0, 0, 0, 0.6);
+
+    --jt-danger-bg: #2d1618;
+    --jt-danger-fg: #fca5a5;
+    --jt-danger-border: #6b2a2f;
+    --jt-success-bg: #0f2a20;
+    --jt-success-fg: #6ee7b7;
+    --jt-success-border: #1f5a43;
+    --jt-warning-bg: #2b2310;
+    --jt-warning-fg: #fcd34d;
+    --jt-warning-border: #6b5518;
+    --jt-info-fg: #c7c4ff;
+
+    --jt-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --jt-shadow-md: 0 8px 20px rgba(0, 0, 0, 0.5);
+    --jt-shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.7);
+    --jt-focus-ring: 0 0 0 3px rgba(139, 131, 245, 0.4);
+    --jt-focus-outline: 2px solid #8b83f5;
+  }
+}

@@ -2,8 +2,10 @@
 
 This is the checklist for **you** (the Job Tracker publisher), not for end users.
 
-Goal: store users only click **Sign in with Google** and paste a spreadsheet.
+Goal: store users only click **Sign in with Google**, then **Create tracker sheet** or **Choose from Google Drive**.
 They should not create a Google Cloud project.
+
+The app uses the non-sensitive scope `https://www.googleapis.com/auth/drive.file` (only sheets the app creates or the user picks via Google Picker). The earlier broad `spreadsheets` scope was rejected by Google verification and is gone.
 
 ---
 
@@ -11,15 +13,24 @@ They should not create a Google Cloud project.
 
 | Piece | Purpose |
 |-------|---------|
-| Google Cloud project | Owns Sheets API + OAuth client for Job Tracker |
+| Google Cloud project | Owns Sheets API, Picker API, OAuth clients and API key for Job Tracker |
 | OAuth consent screen | Branding Google shows on “Sign in with Google” |
 | OAuth client (Web application) | Client ID + secret the extension uses |
+| Picker web client + API key | Used by the hosted Picker page `picker/` (section 6) |
 | Redirect URI | Must match `chrome.identity.getRedirectURL()` for the **store** extension ID |
 | Privacy policy URL | Required for store + OAuth verification |
 | Chrome Web Store listing | ZIP upload, screenshots, privacy practices |
-| OAuth verification | Removes “unverified app” warnings for the public |
+| Branding verification | `drive.file` is non-sensitive: no sensitive-scope review or demo video; Google may still verify branding/domain |
 
 End users still sign in with **their** Google account. Writes still go to **their** sheets.
+
+## Replying to Google (checklist)
+
+- [ ] Cloud Console → Google Auth Platform → Data Access: **add** `.../auth/drive.file`.
+- [ ] **Remove** `.../auth/spreadsheets` there, and confirm the code/manifest only request `drive.file` (`lib/oauth-config.js`).
+- [ ] Reply to the verification email: “Confirming narrower scopes” (we now request only the non-sensitive `drive.file`).
+- [ ] Test everything first in a **separate test Cloud project** (own OAuth client, Picker setup, `picker/config.js`) before touching production.
+- [ ] Make sure the privacy policy (from `LISTING_COPY.md`) and store justifications mention `drive.file`.
 
 ---
 
@@ -40,12 +51,12 @@ End users still sign in with **their** Google account. Writes still go to **thei
 4. Support / developer email: your contact email.
 5. App logo (optional): use `icons/icon128.png` / `store/logo.png`.
 6. Scopes: add  
-   `https://www.googleapis.com/auth/spreadsheets`  
-   (Sensitive — verification will be required for broad production use.)
+   `https://www.googleapis.com/auth/drive.file`  
+   (Non-sensitive: no sensitive-scope verification or demo video. Do **not** add `spreadsheets`.)
 7. While status is **Testing**, add your own Google account(s) as test users so you can sign in before verification.
 8. Save.
 
-Later you will click **Publish app** (In production) after verification. Until then only test users can sign in.
+Click **Publish app** (In production) when ready; non-sensitive scopes don't need scope review. Until then only test users can sign in.
 
 ---
 
@@ -54,7 +65,7 @@ Later you will click **Publish app** (In production) after verification. Until t
 1. [Credentials](https://console.cloud.google.com/apis/credentials) → **Create credentials** → **OAuth client ID**.
 2. Application type: **Web application** (matches this extension’s `launchWebAuthFlow` + auth code + PKCE flow).
 3. Name: e.g. `Job Tracker Chrome`.
-4. **Authorized JavaScript origins:** leave empty (not used by this flow).
+4. **Authorized JavaScript origins:** leave empty (this client is for the extension's auth-code flow; the Picker uses its own Web client, section 6).
 5. **Authorized redirect URIs:** add the extension redirect URI (see next section).
 6. Create → copy **Client ID** and **Client secret**.
 
@@ -136,7 +147,24 @@ For a one-off local test you may set `DEFAULT_OAUTH_CLIENT_ID` / `DEFAULT_OAUTH_
 
 ---
 
-## 6. Home page + privacy policy
+## 6. Google Picker (Choose from Google Drive)
+
+Google's Picker script cannot run in an MV3 extension page, so it runs on a page we host: `https://jobtracker.jayshah.xyz/picker/?ext=<extension id>&ids=<optional spreadsheet ids>` (files in `picker/`, served by GitHub Pages). After the user picks, the page calls `chrome.runtime.sendMessage(<ext id>, {type: 'SHEETS_PICKED', files})` and the service worker accepts it only from origin `https://jobtracker.jayshah.xyz`.
+
+In the **same Cloud project** as the extension's published OAuth client (required: `drive.file` grants are per project; a Picker from another project would not give the extension access):
+
+1. Enable the [Google Picker API](https://console.cloud.google.com/apis/library/picker.googleapis.com) (and the Sheets API from section 1). The extension itself never calls the Drive API (only Sheets); if the Picker still reports an API-not-enabled error, enable the Google Drive API in the same project too.
+2. Credentials → **Create credentials → API key**. Restrict it: API restriction = **Google Picker API**; Website restriction = HTTP referrer `https://jobtracker.jayshah.xyz/*`.
+3. Credentials → **Create credentials → OAuth client ID → Web application** (separate from the extension client). **Authorized JavaScript origins:** `https://jobtracker.jayshah.xyz`. No redirect URI needed.
+4. Note the **Project number** (Cloud Console → project Settings / Dashboard; digits, not the project ID).
+5. Fill `picker/config.js`: `CLIENT_ID` (step 3), `API_KEY` (step 2), `PROJECT_NUMBER` (step 4). These are public identifiers, safe to commit. Push to deploy via GitHub Pages.
+6. Test: open the picker URL (or use **Choose from Google Drive** in Settings, which fills in `?ext=` for you; store and unpacked builds have different IDs and the extension always passes its own) with your extension ID (`chrome://extensions`) in Chrome, click **Choose from Google Drive**, pick a sheet, confirm it appears in Job Tracker Settings.
+
+Custom OAuth clients (Set up Google → Advanced) are in a different Cloud project, so those users only get **Create tracker sheet**; the Picker button is hidden for them.
+
+---
+
+## 7. Home page + privacy policy
 
 GitHub Pages in this repo serves:
 
@@ -154,7 +182,7 @@ Add the same URLs to:
 
 ---
 
-## 7. Chrome Web Store listing
+## 8. Chrome Web Store listing
 
 Follow `store/README.md` and `store/LISTING_COPY.md`.
 
@@ -171,41 +199,42 @@ After the store ID exists, update the OAuth redirect URI (section 4).
 
 ---
 
-## 8. OAuth app verification (for public users)
+## 9. OAuth app verification (for public users)
 
 While the consent screen is **Testing**, only listed test users can finish sign-in.
 
 To open it to everyone:
 
-1. OAuth consent screen → prepare for verification (scopes, policy, domains as Google asks).
-2. Submit for verification for the Spreadsheets scope.
-3. When approved, set publishing status to **In production**.
+`drive.file` is non-sensitive, so there is no sensitive-scope verification and no demo video (see `DEMO_VIDEO.md`). To open sign-in to everyone:
 
-Until verified, Google may show “unverified app” / limit who can sign in. That is expected.
+1. Complete Branding (app name, logo, home page, privacy policy, authorized domain `jayshah.xyz`). Google may still run branding/domain verification.
+2. Set publishing status to **In production**.
+
+If Google asks for more, answer from this guide; the narrow scope is the whole story.
 
 ---
 
-## 9. What end users see after this works
+## 10. What end users see after this works
 
 1. Install from the store  
 2. Open Job Tracker → **Sign in with Google**  
-3. Settings → paste a Google Sheets link **that account can edit**  
+3. Settings → **Create tracker sheet**, or **Choose from Google Drive** to pick existing sheets  
 4. Save jobs from postings  
 
 **Set up Google** still exists for troubleshooting and for **Advanced: use your own OAuth client** (BYO Cloud project).
 
 ---
 
-## 10. Costs reminder
+## 11. Costs reminder
 
 - No per-user OAuth fee  
-- Sheets API is free within Google’s usage quotas (see Google’s Sheets API limits docs)  
+- Sheets API and Picker API are free within Google’s usage quotas (see Google’s Sheets API limits docs)  
 - Chrome Web Store: one-time $5 developer fee  
-- Verification: time/process, not a Google “OAuth tax”
+- Branding verification: time/process, not a Google “OAuth tax”
 
 ---
 
-## 11. Security notes
+## 12. Security notes
 
 - Client secret inside a public extension is recoverable; still don’t put it in git history.  
 - Prefer the pack-time inject path.  
@@ -225,5 +254,6 @@ npm test
 npm run pack
 # upload dist/job-tracker-*.zip
 # add https://<STORE_ID>.chromiumapp.org/ to OAuth redirect URIs
-# finish store privacy + OAuth verification
+# fill picker/config.js (section 6), push to GitHub Pages
+# finish store privacy + branding
 ```

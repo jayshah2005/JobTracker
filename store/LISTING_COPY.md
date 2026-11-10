@@ -19,7 +19,7 @@ Edit the bracketed bits if needed. Keep answers factual; reviewers check them ag
 ### Single purpose description (Privacy practices)
 
 ```
-Job Tracker helps users save job application details from job posting pages into their own Google Spreadsheets. It autofills fields from the current page when possible, lets the user review or edit them, and writes or updates a row in a sheet the user chooses. It does not browse the web on its own, run ads, or provide unrelated features.
+Job Tracker helps users save job application details from job posting pages into their own Google Sheets. It autofills fields from the current page when possible, lets the user review or edit them, and writes or updates a row in a sheet the user creates with the extension or explicitly chooses in Google’s file picker. It does not browse the web on its own, run ads, or provide unrelated features.
 ```
 
 ### Short description (≤132 characters — matches manifest)
@@ -41,7 +41,7 @@ How it works
 
 Setup (once)
 • Sign in with Google (the in-extension “Set up Google” guide helps if anything goes wrong)
-• Paste a Google Sheets link you can edit
+• Create a tracker sheet with one click, or choose an existing sheet from Google Drive
 • Optionally map columns to match your spreadsheet
 
 Privacy
@@ -51,7 +51,7 @@ Privacy
 
 Requirements
 • A Google account and a spreadsheet you can edit
-• Google sign-in that grants Job Tracker access to Google Sheets (only the spreadsheets scope is requested)
+• Google sign-in that grants Job Tracker access only to the spreadsheets it creates or you choose (the non-sensitive drive.file scope)
 ```
 
 ### Category
@@ -71,38 +71,28 @@ Paste each into the matching field on the Privacy practices tab.
 ### storage
 
 ```
-Used to store the user’s extension settings on their device: Google OAuth client configuration, access/refresh tokens for Google Sheets, linked spreadsheet configuration (IDs, tab mappings, column settings), and UI preferences. Also used for short-lived side-panel drafts in session storage so form input is not lost while editing. This data is not uploaded to Job Tracker servers — the extension has no backend. Spreadsheet contents are written only to the user’s Google Sheets via Google’s APIs.
-```
-
-### activeTab
-
-```
-Used when the user opens Job Tracker on the tab they are viewing so the extension can read that tab’s URL and page content (with scripting) to autofill job fields for the save form. Access is limited to the active tab in response to the user’s action (opening the sidebar or saving), not continuous background scraping of unrelated sites.
+Used to store the user’s extension settings on their device: Google OAuth client configuration, access/refresh tokens for Google, linked spreadsheet configuration (IDs, tab mappings, column settings), the undo history for column edits, and UI preferences. Also used for short-lived session storage (a cache of the job details read from the current page, and side-panel drafts) so form input is not lost while editing. This data is not uploaded to Job Tracker servers; the extension has no backend. Spreadsheet contents are written only to the user’s Google Sheets via Google’s APIs.
 ```
 
 ### identity
 
 ```
-Used for Google OAuth sign-in via chrome.identity (launchWebAuthFlow and the extension redirect URL). This lets the user authorize Job Tracker to call the Google Sheets API with their account so applications can be saved to spreadsheets they own. Identity is not used for unrelated Google products or for signing the user into third-party sites.
+Used for Google OAuth sign-in via chrome.identity (launchWebAuthFlow and the extension redirect URL). This lets the user authorize Job Tracker (scope https://www.googleapis.com/auth/drive.file, per-file access only) to call the Google Sheets API so applications can be saved to spreadsheets the extension creates or the user picks. Identity is not used for unrelated Google products or for signing the user into third-party sites.
 ```
 
 ### scripting
 
 ```
-Used to run the extension’s packaged job-extraction script in the frames of the active job page so company, role, location, URL, and similar fields can be autofilled. Scripts are shipped inside the extension package (for example lib/job-extractor.js loaded via chrome.runtime.getURL). Scripting is not used to inject third-party or remotely hosted code.
+Used to run the extension’s packaged job-extraction script in the frames of the job page the user has open, so company, role, location, URL, and similar fields can be autofilled. The script ships inside the extension package (lib/job-extractor.js, loaded via chrome.runtime.getURL). Scripting is not used to inject third-party or remotely hosted code.
 ```
 
 ### sidePanel
 
 ```
-Used to show Job Tracker’s main UI as a Chrome side panel attached to the tab where the user is viewing a job posting. The panel is where users review autofilled fields, choose a destination sheet, and save or update applications. The side panel is opened only when the user clicks the extension action or the on-page launcher.
+Used to show Job Tracker’s main UI as a Chrome side panel attached to the tab where the user is viewing a job posting. The panel is where users review autofilled fields, choose a destination sheet, and save, update or delete applications. The side panel is opened only when the user clicks the extension action or the on-page launcher.
 ```
 
-### tabs
-
-```
-Used to identify the tab the sidebar is bound to, open the Google setup and settings pages, and coordinate opening/closing the side panel for that tab. Tab metadata (such as URL) supports matching the current posting to rows already in the user’s sheet and keeping drafts scoped per tab. Tabs are not used to open or monitor browsing history in the background.
-```
+The manifest does not request `tabs` or `activeTab`; do not add justifications for them. Reading a page’s URL relies on the host access below.
 
 ### Host permission use
 
@@ -111,9 +101,9 @@ Chrome may show one field covering host permissions. Use this:
 ```
 Host access is required for two purposes only:
 
-1) Google APIs — https://www.googleapis.com/*, https://accounts.google.com/*, https://oauth2.googleapis.com/*, and https://docs.google.com/* (plus the Sheets API endpoint sheets.googleapis.com, which is covered by the broad access below) so the extension can complete OAuth and read/write the user’s Google Spreadsheets after they sign in.
+1) Google APIs — https://sheets.googleapis.com/*, https://accounts.google.com/*, and https://oauth2.googleapis.com/* so the extension can complete OAuth and read/write the spreadsheets the user created with the extension or chose in Google Picker after they sign in. The extension also accepts one message from https://jobtracker.jayshah.xyz (externally_connectable) carrying the IDs and names of the sheets the user picked.
 
-2) Job posting pages — broad site access (<all_urls> / matching content scripts) so Job Tracker can show its optional launcher on pages that look like job postings and extract visible job details from the page the user has open. The extension does not collect browsing history, does not inject ads, and does not send page contents to any Job Tracker server. Extracted fields are shown to the user and, if they choose Save, written to their own Google Sheet.
+2) Job posting pages — broad site access (<all_urls> / matching content scripts) so Job Tracker can show its optional launcher on pages that look like job postings and extract visible job details from the page the user has open, including reading that page’s URL (the extension does not request the tabs or activeTab permissions). The extension does not collect browsing history, does not inject ads, and does not send page contents to any Job Tracker server. Extracted fields are shown to the user and, if they choose Save, written to their own Google Sheet.
 ```
 
 If the form asks separately for **\<all_urls\>** / content script matches:
@@ -125,7 +115,7 @@ Required so users can track applications from any job board or company careers s
 If asked separately for **Google API hosts**:
 
 ```
-Required to authenticate with Google and call the Google Sheets API so application rows can be created or updated in spreadsheets the user links in Settings.
+Required to authenticate with Google and call the Google Sheets API so application rows can be created or updated in spreadsheets the extension created or the user picked.
 ```
 
 ### Remote code use
@@ -149,7 +139,7 @@ Suggested answers if the form asks what data is collected / used:
 | Question (typical) | Answer |
 |--------------------|--------|
 | Personally identifiable information | Yes — Google account identity as provided by OAuth (email may appear via Google sign-in); job application details the user saves |
-| Health / financial / auth credentials | Auth: OAuth tokens stored locally for Google Sheets access. No health/financial product features |
+| Health / financial / auth credentials | Auth: OAuth tokens stored locally for access to the user’s chosen Google Sheets. No health/financial product features |
 | Personal communications | No |
 | Location | Only if present on the job posting and saved as a field by the user; not device GPS |
 | Web history | No (only the current page when the user uses Job Tracker) |
@@ -158,7 +148,7 @@ Suggested answers if the form asks what data is collected / used:
 **Data usage disclosure (short paragraph):**
 
 ```
-Job Tracker processes job-related fields the user chooses to save (such as company, role, URL, location, status, and custom column values) and Google OAuth tokens needed to access Sheets. Data is stored in Chrome storage on the user’s device and in Google Spreadsheets the user selects. The developer does not operate a Job Tracker server that receives this data. We do not sell user data or use it for advertising.
+Job Tracker processes job-related fields the user chooses to save (such as company, role, URL, location, status, and custom column values) and Google OAuth tokens needed to access Sheets. Data is stored in Chrome storage on the user’s device and in Google Sheets the user selects. The developer does not operate a Job Tracker server that receives this data. We do not sell user data or use it for advertising.
 ```
 
 **Certification checkbox:** check that your use complies with Chrome Web Store Developer Programme Policies.
@@ -182,25 +172,25 @@ below from this file on page load — edit the fenced block and push.
 
 ```
 Privacy Policy — Job Tracker Chrome Extension
-Last updated: Nov 6, 2026
+Last updated: Nov 9, 2026
 
-Job Tracker (“the Extension”) helps you save job application information from web pages into Google Spreadsheets that you control.
+Job Tracker (“the Extension”) helps you save job application information from web pages into Google Sheets that you control.
 
 1. Who we are
 Jay, publisher of Job Tracker. Contact: jayshah3616@gmail.com
 
 2. Google user data we access
-• Google OAuth access and refresh tokens used to call the Google Sheets API on your behalf
-• Spreadsheet identifiers, tab names, and header/column mappings for sheets you explicitly link
+• Google OAuth access and refresh tokens used to call the Google Sheets API on your behalf (scope: drive.file, which only covers spreadsheets Job Tracker creates or you choose in Google’s file picker)
+• Spreadsheet identifiers and names, tab names, and header/column mappings for sheets you create with Job Tracker or choose in Google’s file picker
 • Spreadsheet cell values the Extension reads or writes when you save or update a job application (for example company, role, URL, location, status, notes)
 • Optional UI preferences stored only on your device (for example whether to show the on-page button)
 • Job details read from the posting page you have open (for example title, company, location, URL). They are kept in temporary browser session storage so the side panel opens quickly and keeps your unsaved edits, and are written to a spreadsheet only when you click Save
 • If you use your own Google Cloud OAuth client, the Client ID and secret you paste, stored on your device
 
-We do not request access to Gmail, Google Drive file libraries beyond Sheets API calls for spreadsheets you link, Contacts, Calendar, or other Google products.
+We do not request access to your other Drive files, Gmail, Contacts, Calendar, or other Google products. Job Tracker can only see spreadsheets it created or that you explicitly select in Google’s file picker. The picker runs on jobtracker.jayshah.xyz, which only passes the IDs and names of the sheets you picked to the Extension in your browser; that page stores nothing.
 
 3. How Google user data is used
-• To authenticate with Google and read/write rows in spreadsheets you link
+• To authenticate with Google and read/write rows in spreadsheets you created with Job Tracker or chose
 • To autofill and display job fields in the Extension UI for you to review before saving
 • Only to provide or improve these user-facing Job Tracker features
 
@@ -216,17 +206,17 @@ Sensitive Google user data means your OAuth tokens and the spreadsheet contents 
 • In transit: every request to Google OAuth and the Google Sheets API uses HTTPS (TLS)
 • On our systems: we do not store tokens or spreadsheet contents on Job Tracker servers. There is no Job Tracker backend and no separate database of this data
 • On your device: tokens and sheet configuration stay in Chrome’s extension storage, available only to this Extension in that browser profile
-• Access control: spreadsheet access requires you to sign in with Google and grant the Spreadsheets permission. The Extension only uses spreadsheet links you paste and that your Google account can edit
+• Access control: spreadsheet access requires you to sign in with Google and grant the per-file Drive permission (drive.file). The Extension can only open spreadsheets it created or that you selected in Google’s file picker
 
 6. Retention and deletion of Google user data
 We do not retain Google user data on Job Tracker servers, so there is no server copy for us to keep or delete. Retention and deletion of the data we do handle:
 • OAuth tokens are retained only in Chrome extension storage on your device while you are signed in. Signing out deletes those tokens from the Extension. Clearing the Extension’s data in Chrome, or uninstalling it, also deletes them. Signing out does not by itself revoke Google’s authorization; you delete that access in your Google Account under Data & privacy → Third-party apps & services
-• Sheet configuration (IDs, tabs, column mappings) and UI preferences are retained locally until you remove a linked sheet in Settings, clear Extension data, or uninstall
-• Job details read from the open posting page are retained only in temporary browser session storage and are deleted when you save, close the side panel, or end the browser session
+• Sheet configuration (IDs, tabs, column mappings) and UI preferences are retained locally until you remove a connected sheet in Settings, clear Extension data, or uninstall
+• Job details read from the open posting page are retained only in temporary browser session storage and are deleted when you save, close or navigate the tab, or end the browser session
 • Spreadsheet contents are retained in your Google Sheet under your Google account until you change or delete them. Delete in Job Tracker deletes that row from your sheet. Uninstalling the Extension does not delete the spreadsheet. You can also delete rows or the whole spreadsheet yourself in Google Sheets
 
 7. Third parties
-Google (Accounts / OAuth / Sheets) under Google’s terms and privacy policy. You must use a Google account and grant access. No other third parties receive your Google user data from Job Tracker.
+Google (Accounts / OAuth / Sheets / Drive file picker) under Google’s terms and privacy policy. You must use a Google account and grant access. The picker page and this website are served by GitHub Pages, which may log ordinary web requests (such as IP address) for those pages. No other third parties receive your Google user data from Job Tracker.
 
 8. Children’s privacy
 Not directed at children under 13.
@@ -247,7 +237,7 @@ You need **at least one** screenshot (1280×800 or 640×400 recommended).
 ### What to capture
 
 1. Side panel open on a real job posting with autofilled fields visible  
-2. (Optional) Settings page with a linked sheet  
+2. (Optional) Settings page with a connected sheet  
 3. (Optional) “Already in tracker” / edit flow  
 
 ### Quick way to create one
@@ -284,5 +274,6 @@ A short Loom/MP4 of open → fill → Save also satisfies “screenshot or video
 
 - **\<all_urls\>**: justified by “any job board”; do not claim you only run on 2–3 sites unless you narrow the manifest.  
 - **Remote code**: answer No; dynamic `import` of packaged files is not remote code.  
-- **Identity + Sheets**: say clearly data goes to the **user’s** spreadsheet, not your servers.  
+- **Permissions list**: only `storage`, `identity`, `scripting`, `sidePanel` plus the hosts below; if the manifest changes, update this file.  
+- **Identity + Sheets**: say clearly data goes to the **user’s** spreadsheet, not your servers, and that the scope is per-file `drive.file`.  
 - Keep the live ZIP matching these claims (`npm run pack`).

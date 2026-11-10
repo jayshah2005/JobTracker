@@ -1,9 +1,10 @@
 /**
  * Settings page (options/options.html).
  *
- * Responsibilities: Google sign-in/out, connecting spreadsheets, editing
- * column headers / field types / dropdown choices (with undo + redo), and the
- * two display preferences. All Google and storage work happens in the service
+ * Responsibilities: Google sign-in/out, connecting spreadsheets (create /
+ * choose with Google / paste a link), editing column headers / field types /
+ * dropdown choices (with undo + redo), and the preferences (auto-show panel,
+ * Role hyperlink, default save destination). All Google and storage work happens in the service
  * worker via chrome.runtime messages (see sendMessage); this file only renders
  * state and reports the result of every action in the #status banner.
  *
@@ -18,6 +19,12 @@ import {
   DESTRUCTIVE_WARNING,
   isDestructiveOp,
 } from '../lib/schema-editor.js';
+import {
+  createSheetAccess,
+  applyAccessFlags,
+  NEEDS_ACCESS_LABEL,
+  NEEDS_ACCESS_HINT_NO_PICKER,
+} from '../sidepanel/sheet-access.js';
 import { normalizeDropdownOptions, normalizeDropdownDefault } from '../lib/field-mapper.js';
 import {
   getSettings,
@@ -40,6 +47,8 @@ let undoStack = [];
 let redoStack = [];
 /** Remember which dropdown editors the user expanded. */
 const openDropdownEditors = new Set();
+/** Dropdown editors already auto-synced from the sheet this page load. */
+const syncedEditors = new Set();
 /** Active spreadsheet + worksheet tab selections (survive re-renders). */
 let activeSpreadsheetId = null;
 const activeWorksheetBySheet = new Map();
@@ -118,7 +127,33 @@ let statusTimer = null;
 // Startup
 // ---------------------------------------------------------------------------
 
+/** Add-sheet controller (create / choose / grant access); set in init(). */
+let sheetAccess = null;
+
 async function init() {
+  sheetAccess = createSheetAccess({
+    sendMessage,
+    showStatus,
+    getSheets: () => sheets,
+    onAccessChanged: (next) => {
+      sheets = applyAccessFlags(sheets, next);
+      renderSheetList();
+    },
+    els: {
+      create: $('#create-sheet-btn'),
+      choose: $('#choose-sheet-btn'),
+      grant: $('#grant-sheet-btn'),
+      hint: $('#picker-hint'),
+      note: $('#access-note'),
+    },
+    onSheetsChanged: async (next, text) => {
+      sheets = next || sheets;
+      const added = sheets[sheets.length - 1];
+      if (added?.spreadsheetId) activeSpreadsheetId = added.spreadsheetId;
+      renderSheetList();
+      showStatus(text, 'success');
+    },
+  });
   $('#add-sheet-btn').addEventListener('click', handleAddSheet);
   $('#refresh-btn').addEventListener('click', handleRefresh);
   $('#undo-btn').addEventListener('click', () => handleUndo());
@@ -180,6 +215,8 @@ function handleSchemaHistoryShortcut(e) {
   if (!mod || e.altKey) return;
   // Let the browser handle text undo/redo inside fields.
   if (isEditableTarget(e.target)) return;
+  // A modal dialog (e.g. a delete confirmation) must not be undone from behind.
+  if (document.querySelector('.jt-dialog-backdrop')) return;
 
   const key = e.key.toLowerCase();
   if (key === 'z' && !e.shiftKey) {
@@ -203,8 +240,15 @@ function handleSchemaHistoryShortcut(e) {
 async function loadAuth() {
   const res = await sendMessage({ type: 'GET_AUTH_STATUS' });
   const signedIn = !!res?.signedIn;
+  // First-run users see the guide expanded; returning users get it collapsed.
+  if (!signedIn) $('#help-box')?.setAttribute('open', '');
   $('#google-signed-in').classList.toggle('hidden', !signedIn);
   $('#google-signed-out').classList.toggle('hidden', signedIn);
+  sheetAccess?.applyAuth(res);
+  if (!signedIn && (res?.message || res?.error)) {
+    const lead = $('#google-signed-out .setup-lead');
+    if (lead) lead.textContent = res.message || res.error;
+  }
   return signedIn;
 }
 
@@ -225,7 +269,7 @@ async function handleSignIn() {
     }
     if (res?.success && res.signedIn) {
       await loadAuth();
-      showStatus('Google connected. You can add any sheets this account can edit.', 'success');
+      showStatus('Google connected. Create a tracker sheet or choose an existing one.', 'success');
       // Pick up sheets that were saved before a previous sign-out.
       loadSheets({ fromNetwork: true, quiet: true }).catch(() => {});
     } else {
@@ -241,7 +285,11 @@ async function handleSignIn() {
 
 async function handleSignOut() {
   try {
-    await sendMessage({ type: 'SIGN_OUT' });
+    const out = await sendMessage({ type: 'SIGN_OUT' });
+    if (out?.success === false) {
+      showStatus(out.error || 'Could not sign out.', 'error');
+      return;
+    }
     await loadAuth();
     // Sign-out only forgets the local token; connected sheets stay listed.
     showStatus('Signed out. Your sheets stay listed; sign in again to read or update them.', 'success');
@@ -262,25 +310,42 @@ async function handleSignOut() {
  * @returns {Promise<boolean>} false when a network refresh failed
  */
 
+let loadSeq = 0;
+
+/** True while the user is typing in the sheet list (a re-render would discard it). */
+function userIsEditingSheetList() {
+  const active = document.activeElement;
+  return Boolean($('#sheet-list')?.contains(active) && isEditableTarget(active));
+}
+
 async function loadSheets({ fromNetwork = false, quiet = false } = {}) {
+  const seq = ++loadSeq;
   const res = await sendMessage({
     type: fromNetwork ? 'REFRESH_SHEETS' : 'GET_SHEETS',
   });
+  // A newer load (or a user action that bumped the sequence) supersedes this one.
+  if (seq !== loadSeq) return true;
 
   if (fromNetwork && !res?.success) {
     const cached = await sendMessage({ type: 'GET_SHEETS' });
+    if (seq !== loadSeq) return true;
     sheets = cached?.sheets || [];
-    renderSheetList();
-    await syncDropdownColumnsFromSheet();
+    if (!(quiet && userIsEditingSheetList())) renderSheetList();
+    await syncDropdownColumnsFromSheet(quiet);
     if (!quiet) {
       showStatus(res?.error || 'Could not refresh sheets from Google.', 'error');
     }
     return false;
   }
 
-  sheets = res?.sheets || [];
-  renderSheetList();
-  await syncDropdownColumnsFromSheet();
+  if (!res?.sheets) {
+    // Keep what is on screen rather than blanking the list on a failed read.
+    if (!quiet) showStatus(res?.error || 'Could not load your sheets.', 'error');
+    return false;
+  }
+  sheets = res.sheets;
+  if (!(quiet && userIsEditingSheetList())) renderSheetList();
+  await syncDropdownColumnsFromSheet(quiet);
   return true;
 }
 
@@ -288,7 +353,7 @@ async function loadSheets({ fromNetwork = false, quiet = false } = {}) {
  * For any Custom Dropdown that has no choices (or no cached uniques),
  * re-read the sheet and auto-fill empty dropdowns from unique column values.
  */
-async function syncDropdownColumnsFromSheet() {
+async function syncDropdownColumnsFromSheet(quiet = false) {
   const jobs = [];
   for (const sheet of sheets) {
     for (const tab of sheet.tabs || []) {
@@ -325,7 +390,7 @@ async function syncDropdownColumnsFromSheet() {
       updated = true;
     }
   }
-  if (updated) renderSheetList();
+  if (updated && !(quiet && userIsEditingSheetList())) renderSheetList();
 }
 
 function getColumnUniqueValues(tab, columnIndex) {
@@ -346,7 +411,7 @@ async function loadSettings() {
 
 /** Same label the side panel uses for a destination. */
 function destinationLabel(d) {
-  return `${d.sheetName || 'Spreadsheet'} → ${d.tabName || 'Sheet'}`;
+  return `${d.sheetName || 'Untitled sheet'} → ${d.tabName || 'Sheet'}`;
 }
 
 /** Fill the Default sheet select from the current sheets; disabled with one destination. */
@@ -415,25 +480,25 @@ async function saveSettingsFromUI() {
 // ---------------------------------------------------------------------------
 
 async function handleAddSheet() {
+  const btn = $('#add-sheet-btn');
+  if (btn.disabled) return; // Enter pressed while a request is running
   const url = $('#sheet-url').value.trim();
   if (!url) {
     showStatus('Paste a Google Sheets link first.', 'error');
     return;
   }
 
-  const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
-  if (!auth?.signedIn) {
-    showStatus('Sign in with Google first. That login is reused for every sheet.', 'error');
-    return;
-  }
-
-  const btn = $('#add-sheet-btn');
   btn.disabled = true;
   btn.textContent = 'Adding…';
 
   try {
+    const auth = await sendMessage({ type: 'GET_AUTH_STATUS' });
+    if (!auth?.signedIn) {
+      showStatus('Sign in with Google first. That login is reused for every sheet.', 'error');
+      return;
+    }
     const res = await sendMessage({ type: 'ADD_SHEET', url });
-    if (res?.success) {
+    if (sheetAccess.handleAddResult(res) && res?.success) {
       sheets = res.sheets;
       if (res.sheet?.spreadsheetId) {
         activeSpreadsheetId = res.sheet.spreadsheetId;
@@ -442,15 +507,13 @@ async function handleAddSheet() {
       }
       $('#sheet-url').value = '';
       renderSheetList();
-      showStatus(`Added “${res.sheet?.name || 'spreadsheet'}”.`, 'success');
-    } else {
-      showStatus(res?.error || 'Failed to add sheet.', 'error');
+      showStatus(`Added “${res.sheet?.name || 'sheet'}”.`, 'success');
     }
   } catch (err) {
     showStatus(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Add Sheet';
+    btn.textContent = 'Add sheet';
   }
 }
 
@@ -466,7 +529,7 @@ async function handleRefresh() {
     showStatus(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Refresh All Sheets';
+    btn.textContent = 'Refresh all sheets';
   }
 }
 
@@ -508,13 +571,45 @@ function renderUndoBar() {
 /** Re-render the whole sheet workspace and rebind every control inside it. */
 function renderSheetList() {
   const container = $('#sheet-list');
+  const refocus = captureFocus(container);
+  renderSheetListInner(container);
+  refocus();
+}
+
+/**
+ * Remember which button/input inside `container` has focus and return a
+ * function that refocuses its re-rendered twin (matched by id or data-*).
+ * Combo inputs are skipped on purpose: focusing one opens its menu.
+ */
+const quoteAttr = (v) => String(v).replace(/["\\]/g, '\\$&');
+
+function captureFocus(container) {
+  const el = document.activeElement;
+  if (!el || !container.contains(el)) return () => {};
+  const isButton = el.tagName === 'BUTTON';
+  const isPlainInput = el.matches?.('.header-input, .dropdown-option-input');
+  if (!isButton && !isPlainInput) return () => {};
+  const tag = el.tagName.toLowerCase();
+  const cls = isPlainInput ? (el.classList.contains('header-input') ? '.header-input' : '.dropdown-option-input') : '';
+  const attrs = Object.entries(el.dataset).map(
+    ([k, v]) => `[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${quoteAttr(v)}"]`
+  );
+  if (!attrs.length && !el.id) return () => {};
+  const selector = `${tag}${cls}${el.id ? `[id="${quoteAttr(el.id)}"]` : ''}${attrs.join('')}`;
+  return () => {
+    const next = container.querySelector(selector);
+    if (next && !next.disabled) next.focus({ preventScroll: true });
+  };
+}
+
+function renderSheetListInner(container) {
   renderDefaultDestination();
 
   if (sheets.length === 0) {
     activeSpreadsheetId = null;
     activeWorksheetBySheet.clear();
     container.innerHTML =
-      '<div class="empty-state card"><p>No sheets connected yet. Paste a Google Sheets link above to get started.</p></div>';
+      '<div class="empty-state card"><p>No sheets yet. Create a tracker sheet or choose one above.</p></div>';
     return;
   }
 
@@ -532,8 +627,8 @@ function renderSheetList() {
         role="tab"
         aria-selected="${selected ? 'true' : 'false'}"
         data-select-sheet="${s.spreadsheetId}"
-        title="${escapeHtml(s.name || 'Spreadsheet')}">
-        ${escapeHtml(s.name || 'Spreadsheet')}
+        title="${escapeHtml(s.name || 'Untitled sheet')}">
+        <span class="sheet-tab-name">${escapeHtml(s.name || 'Untitled sheet')}</span>${s.needsAccess ? `<span class="needs-access-badge">${NEEDS_ACCESS_LABEL}</span>` : ''}
       </button>`;
     })
     .join('');
@@ -557,6 +652,13 @@ function renderSheetList() {
     bindWorksheetTab(btn, sheet.spreadsheetId);
   });
 
+  container.querySelectorAll('[data-grant-sheet]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (await sheetAccess.openPicker(btn, btn.dataset.grantSheet)) {
+        showStatus('Finish choosing your sheet in the new tab…', 'info');
+      }
+    });
+  });
   container.querySelectorAll('[data-remove-sheet]').forEach((btn) => {
     btn.addEventListener('click', () => handleRemoveSheet(btn.dataset.removeSheet));
   });
@@ -620,6 +722,18 @@ function renderSheetList() {
 }
 
 /** Markup for one spreadsheet: toolbar, worksheet tabs, and active tab body. */
+/** "Needs access" row for a sheet Job Tracker lost access to ('' otherwise). */
+function renderNeedsAccess(sheet) {
+  if (!sheet.needsAccess) return '';
+  if (sheetAccess?.isPickerOk() === false) {
+    return `<p class="worksheet-hint needs-access-hint"><strong>${NEEDS_ACCESS_LABEL}.</strong> ${NEEDS_ACCESS_HINT_NO_PICKER}</p>`;
+  }
+  return `<div class="needs-access-row">
+        <span class="worksheet-hint"><strong>${NEEDS_ACCESS_LABEL}.</strong> Choose this sheet in Google to keep using it.</span>
+        <button type="button" class="btn btn-primary btn-sm needs-access-btn" data-grant-sheet="${escapeHtml(sheet.spreadsheetId)}">Grant access</button>
+      </div>`;
+}
+
 function renderSheetPanel(sheet, tab) {
   const worksheets = sheet.tabs || [];
   const worksheetTabs = worksheets
@@ -642,7 +756,7 @@ function renderSheetPanel(sheet, tab) {
     ? renderTabMappings(sheet, tab)
     : `<div class="empty-state"><p>This spreadsheet has no tabs yet.</p></div>`;
 
-  const sheetTitle = sheet.name || 'Spreadsheet';
+  const sheetTitle = sheet.name || 'Untitled sheet';
   const sheetUrl = sheet.url || '';
 
   return `
@@ -650,7 +764,7 @@ function renderSheetPanel(sheet, tab) {
       <div class="sheet-panel-toolbar">
         <div class="sheet-panel-title-row">
           <h2 class="sheet-panel-title" title="${escapeHtml(sheetTitle)}">${escapeHtml(sheetTitle)}</h2>
-          <button type="button" class="btn btn-danger btn-sm" data-remove-sheet="${sheet.spreadsheetId}">Remove</button>
+          <button type="button" class="btn btn-danger btn-sm" data-remove-sheet="${sheet.spreadsheetId}">Disconnect</button>
         </div>
         ${
           sheetUrl
@@ -658,6 +772,7 @@ function renderSheetPanel(sheet, tab) {
             : ''
         }
       </div>
+      ${renderNeedsAccess(sheet)}
       <div class="worksheet-tabs" role="tablist" aria-label="Spreadsheet tabs">
         ${worksheetTabs}
       </div>
@@ -789,7 +904,10 @@ function beginWorksheetRename(tabBtn) {
  * cached sheet values), read the column from Google once and fill it in.
  */
 async function maybeSyncOnOpen(detailsEl) {
-  if (detailsEl.dataset.synced === '1') return;
+  // Tracked outside the element: re-rendering recreates every <details>, and an
+  // initially-open one fires "toggle" again, which would otherwise loop.
+  const syncKey = detailsEl.dataset.editorKey || '';
+  if (syncedEditors.has(syncKey)) return;
   const spreadsheetId = detailsEl.dataset.sheet;
   const tabId = detailsEl.dataset.tab;
   const columnIndex = parseInt(detailsEl.dataset.col, 10);
@@ -798,9 +916,11 @@ async function maybeSyncOnOpen(detailsEl) {
   const options = normalizeDropdownOptions(mapping?.dropdownOptions);
   const uniques = getColumnUniqueValues(tab, columnIndex);
   if (options.length && uniques.length) {
-    detailsEl.dataset.synced = '1';
+    syncedEditors.add(syncKey);
     return;
   }
+  syncedEditors.add(syncKey); // one attempt per editor per page load; "Scan sheet" retries
+  const seqAtStart = loadSeq;
 
   let res;
   try {
@@ -812,12 +932,22 @@ async function maybeSyncOnOpen(detailsEl) {
       columnIndex,
     });
   } catch {
+    syncedEditors.delete(syncKey);
     return; // Silent: the "Scan sheet" button remains for a manual retry.
   }
-  detailsEl.dataset.synced = '1';
+  if (res?.success === false) {
+    syncedEditors.delete(syncKey); // Silent; allow another attempt on the next open.
+    return;
+  }
   if (res?.success && res.sheets) {
+    if (seqAtStart !== loadSeq) {
+      // A newer load or schema change already updated the screen; this result is older.
+      syncedEditors.delete(syncKey);
+      return;
+    }
     sheets = res.sheets;
-    renderSheetList();
+    // Never discard what the user is typing in a field of the list.
+    if (!userIsEditingSheetList()) renderSheetList();
     const next = getMapping(spreadsheetId, tabId, columnIndex);
     const count = normalizeDropdownOptions(next?.dropdownOptions).length;
     if (count) {
@@ -1032,7 +1162,7 @@ function renderTabMappings(sheet, tab) {
       </table>
       <div class="actions-row">
         <button class="btn btn-secondary btn-sm" data-add-column
-          data-sheet="${sheet.spreadsheetId}" data-tab="${tab.gid}">+ Add Column</button>
+          data-sheet="${sheet.spreadsheetId}" data-tab="${tab.gid}">+ Add column</button>
       </div>
     </div>`;
 }
@@ -1342,6 +1472,7 @@ async function applyChange(spreadsheetId, tabId, change) {
     return null;
   }
 
+  loadSeq += 1; // an in-flight background refresh now holds older data
   sheets = res.sheets;
   undoStack = res.stack || undoStack;
   redoStack = res.redoStack || [];
@@ -1365,6 +1496,11 @@ async function onHeaderRename(e) {
   if (!newHeader) {
     showStatus('Column name cannot be empty.', 'error');
     renderSheetList(); // restore the previous header text
+    return;
+  }
+
+  if (newHeader === input.defaultValue.trim()) {
+    input.value = newHeader; // only whitespace changed: nothing to write or undo
     return;
   }
 
@@ -1466,6 +1602,10 @@ async function onImportSheetOptions(e) {
       columnIndex,
     });
     if (res?.success && res.sheets) sheets = res.sheets;
+    else if (res?.success === false) {
+      showStatus(res.error || 'Could not read this sheet column.', 'error');
+      return;
+    }
   } catch (err) {
     showStatus(err.message || 'Could not read this sheet column.', 'error');
     return;
@@ -1630,9 +1770,13 @@ async function onAddColumn(e) {
  * @param {'undo'|'redo'} kind
  * @param {string} [entryId] optional specific history entry
  */
+let historyBusy = false;
+
 async function runHistoryStep(kind, entryId) {
   const isUndo = kind === 'undo';
+  if (historyBusy) return; // keyboard repeat must not queue a second step
   if (!(isUndo ? undoStack : redoStack).length) return;
+  historyBusy = true;
   const btn = $(isUndo ? '#undo-btn' : '#redo-btn');
   btn.disabled = true;
   btn.textContent = isUndo ? 'Undoing…' : 'Redoing…';
@@ -1643,6 +1787,7 @@ async function runHistoryStep(kind, entryId) {
       entryId,
     });
     if (res?.success) {
+      loadSeq += 1;
       sheets = res.sheets;
       undoStack = res.stack || [];
       redoStack = res.redoStack || [];
@@ -1657,6 +1802,7 @@ async function runHistoryStep(kind, entryId) {
   } catch (err) {
     showStatus(err.message, 'error');
   } finally {
+    historyBusy = false;
     renderUndoBar(); // always resets button labels/disabled state
   }
 }
@@ -1706,17 +1852,24 @@ function showStatus(msg, type) {
   statusTimer = setTimeout(() => el.classList.add('hidden'), type === 'error' ? 8000 : 4500);
 }
 
-/** Promise wrapper around chrome.runtime.sendMessage; rejects on runtime errors. */
+/** Promise wrapper around chrome.runtime.sendMessage; never rejects (runtime errors resolve as { success: false, error }). */
 function sendMessage(msg) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(msg, (res) => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        reject(new Error(err.message));
-        return;
-      }
-      resolve(res);
-    });
+  return new Promise((resolve) => {
+    const fail = (error) =>
+      resolve({
+        success: false,
+        error: error || 'No response from the extension. Reload this page and try again.',
+      });
+    try {
+      chrome.runtime.sendMessage(msg, (res) => {
+        const err = chrome.runtime.lastError;
+        if (err || res == null) fail(err?.message);
+        else resolve(res);
+      });
+    } catch (err) {
+      // e.g. "Extension context invalidated" after the extension was reloaded.
+      fail(err?.message);
+    }
   });
 }
 

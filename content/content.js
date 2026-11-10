@@ -16,6 +16,9 @@
  */
 
 const LAUNCHER_ID = 'job-tracker-launcher';
+/** Distinguishes this script's launcher from one left by an orphaned older copy. */
+const INSTANCE_ID = Math.random().toString(36).slice(2);
+let orphaned = false;
 let launcherVisible = false;
 let sidePanelOpen = false;
 let dismissed = false;
@@ -93,6 +96,50 @@ function pageLooksLikeJob() {
   return false;
 }
 
+/**
+ * Fire-and-forget message to the service worker. After the extension is
+ * reloaded/updated this orphaned script's chrome.runtime.sendMessage throws
+ * synchronously ("Extension context invalidated"), so a bare .catch() is not
+ * enough: the throw would surface from timers and click handlers.
+ */
+function sendToBackground(message) {
+  try {
+    const p = chrome.runtime.sendMessage(message);
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch {
+    // Extension context invalidated: this script is orphaned. Stop polling and
+    // remove the launcher, which can no longer do anything. Any other throw
+    // leaves a live script alone.
+    if (!extensionAlive()) teardownOrphan();
+  }
+}
+
+/** Remove everything an orphaned (post-reload) content script left on the page. */
+function teardownOrphan() {
+  orphaned = true;
+  if (urlWatchTimer) clearInterval(urlWatchTimer);
+  urlWatchTimer = null;
+  lateContentObserver?.disconnect();
+  lateContentObserver = null;
+  for (const t of [lateScanTimer, lateContentStopTimer, preloadTimer]) if (t) clearTimeout(t);
+  lateScanTimer = lateContentStopTimer = preloadTimer = null;
+  // A live newer script may own the launcher now; only remove our own.
+  const el = document.getElementById(LAUNCHER_ID);
+  if (!el || el.dataset.jtInstance === INSTANCE_ID) {
+    el?.remove();
+    document.getElementById('job-tracker-styles')?.remove();
+  }
+}
+
+/** False once the extension was reloaded/updated under this script. */
+function extensionAlive() {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_PAGE_JOB_DATA') {
     loadLibs()
@@ -149,10 +196,10 @@ function injectFallbackStyles() {
       align-items: center !important;
       gap: 8px !important;
       padding: 10px 14px 10px 10px !important;
-      border: 1px solid #c9bce8 !important;
+      border: 1px solid #c7d2fe !important;
       border-radius: 999px !important;
       background: #ffffff !important;
-      color: #3f3566 !important;
+      color: #1f2433 !important;
       box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16) !important;
       cursor: pointer !important;
       font-size: 13px !important;
@@ -161,10 +208,10 @@ function injectFallbackStyles() {
     #${LAUNCHER_ID} .jt-launcher-dismiss {
       width: 28px !important;
       height: 28px !important;
-      border: 1px solid #e5e7eb !important;
+      border: 1px solid #dfe2ec !important;
       border-radius: 999px !important;
       background: #fff !important;
-      color: #6b7280 !important;
+      color: #5b6475 !important;
       cursor: pointer !important;
     }
   `;
@@ -173,8 +220,12 @@ function injectFallbackStyles() {
 
 /** Build the launcher DOM once (top frame only); starts hidden until syncLauncherVisibility. */
 function createLauncher() {
-  if (window !== window.top) return;
-  if (document.getElementById(LAUNCHER_ID)) return;
+  if (window !== window.top || orphaned) return;
+  const existing = document.getElementById(LAUNCHER_ID);
+  if (existing) {
+    if (existing.dataset.jtInstance === INSTANCE_ID) return;
+    existing.remove(); // left by an orphaned copy: its click handler is dead
+  }
 
   injectFallbackStyles();
 
@@ -182,6 +233,7 @@ function createLauncher() {
   root.id = LAUNCHER_ID;
   root.className = 'jt-launcher jt-hidden';
   root.setAttribute('data-job-tracker-launcher', '1');
+  root.dataset.jtInstance = INSTANCE_ID;
   root.innerHTML = `
     <button type="button" class="jt-launcher-btn" title="Open Job Tracker" aria-label="Open Job Tracker">
       <img
@@ -201,7 +253,7 @@ function createLauncher() {
   root.querySelector('.jt-launcher-btn').addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+    sendToBackground({ type: 'OPEN_SIDE_PANEL' });
   });
 
   root.querySelector('.jt-launcher-dismiss').addEventListener('click', (e) => {
@@ -249,7 +301,7 @@ function pageLooksReady() {
 
 /** Show the launcher on job pages, hide it otherwise (and when the setting is off). */
 function maybeShowLauncher() {
-  if (window !== window.top) return;
+  if (window !== window.top || orphaned) return;
   if (!autoShowEnabled) {
     // The setting loads asynchronously: the launcher may already be visible.
     hideLauncher();
@@ -270,17 +322,13 @@ function requestPreloadJobData() {
   preloadTimer = setTimeout(() => {
     preloadTimer = null;
     if (!pageLooksLikeJob()) {
-      chrome.runtime
-        .sendMessage({ type: 'CLEAR_TAB_JOB_PRELOAD' })
-        .catch(() => {});
+      sendToBackground({ type: 'CLEAR_TAB_JOB_PRELOAD' });
       return;
     }
-    chrome.runtime
-      .sendMessage({
-        type: 'PRELOAD_TAB_JOB_DATA',
-        url: window.location.href,
-      })
-      .catch(() => {});
+    sendToBackground({
+      type: 'PRELOAD_TAB_JOB_DATA',
+      url: window.location.href,
+    });
   }, 400);
 }
 
@@ -310,15 +358,20 @@ function watchForLateContent() {
     return;
   }
 
+  const scan = () => {
+    lateScanTimer = null;
+    if (!pageLooksLikeJob()) return false;
+    lateContentObserver?.disconnect();
+    lateContentObserver = null;
+    maybeShowLauncher();
+    requestPreloadJobData();
+    return true;
+  };
+  // Throttle, not debounce: on a page that mutates constantly (feeds, ads,
+  // animations) a debounce never fires and the launcher would never appear.
   lateContentObserver = new MutationObserver(() => {
-    if (lateScanTimer) clearTimeout(lateScanTimer);
-    lateScanTimer = setTimeout(() => {
-      if (!pageLooksLikeJob()) return;
-      lateContentObserver?.disconnect();
-      lateContentObserver = null;
-      maybeShowLauncher();
-      requestPreloadJobData();
-    }, 400);
+    if (lateScanTimer) return;
+    lateScanTimer = setTimeout(scan, 500);
   });
 
   lateContentObserver.observe(document.documentElement, {
@@ -327,9 +380,14 @@ function watchForLateContent() {
   });
 
   lateContentStopTimer = setTimeout(() => {
-    lateContentObserver?.disconnect();
-    lateContentObserver = null;
     lateContentStopTimer = null;
+    if (!lateContentObserver) return;
+    // Last look before giving up, so content that settled late is not missed.
+    if (lateScanTimer) clearTimeout(lateScanTimer);
+    if (!scan()) {
+      lateContentObserver?.disconnect();
+      lateContentObserver = null;
+    }
   }, 12000);
 }
 
@@ -339,6 +397,10 @@ function watchForSpaUrlChanges() {
   lastSeenUrl = window.location.href;
 
   const onPossibleUrlChange = () => {
+    if (!extensionAlive()) {
+      teardownOrphan();
+      return;
+    }
     if (window.location.href === lastSeenUrl) return;
     lastSeenUrl = window.location.href;
     dismissed = false;
@@ -388,6 +450,22 @@ async function initTopFrame() {
   }
   watchForLateContent();
   watchForSpaUrlChanges();
+  watchSettingsChanges();
+}
+
+/** Apply the Settings "show button" toggle to already-open tabs without a reload. */
+function watchSettingsChanges() {
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes.settings) return;
+      const next = changes.settings.newValue?.autoShowPopup !== false;
+      if (next === autoShowEnabled) return;
+      autoShowEnabled = next;
+      maybeShowLauncher();
+    });
+  } catch {
+    /* storage unavailable: the setting applies on the next page load */
+  }
 }
 
 if (window === window.top) {
@@ -401,7 +479,6 @@ if (window === window.top) {
   } else {
     start();
   }
-} else {
-  // Warm libs in iframes so GET_PAGE_JOB_DATA replies quickly.
-  loadLibs().catch(() => {});
 }
+// Iframes load the libs lazily on GET_PAGE_JOB_DATA: eagerly importing the
+// extractor into every ad/embed frame of every page costs more than it saves.

@@ -3,16 +3,37 @@
  * when the build has no baked-in OAuth client, lets them paste their own
  * Client ID/secret ("Advanced"). All work is delegated to the service worker
  * via chrome.runtime messages: GET_AUTH_STATUS, SAVE_OAUTH_CLIENT, SIGN_IN,
- * SIGN_OUT. Tokens and secrets never live in this page.
+ * SIGN_OUT, GET_SHEETS, and CREATE_SHEET / OPEN_PICKER (via sidepanel/sheet-access.js)
+ * once signed in so the first sheet can be created or chosen. Tokens and secrets never live in this page.
  */
 
+import { createSheetAccess } from '../sidepanel/sheet-access.js';
+
 const $ = (sel) => document.querySelector(sel);
+
+let sheetAccess = null;
+let knownSheets = [];
 
 async function init() {
   $('#copy-redirect')?.addEventListener('click', copyRedirectUri);
   $('#save-oauth-btn')?.addEventListener('click', handleSave);
   $('#sign-in-btn')?.addEventListener('click', handleSignIn);
   $('#sign-out-btn')?.addEventListener('click', handleSignOut);
+  sheetAccess = createSheetAccess({
+    sendMessage,
+    showStatus,
+    getSheets: () => knownSheets,
+    els: {
+      create: $('#create-sheet-btn'),
+      choose: $('#choose-sheet-btn'),
+      hint: $('#picker-hint'),
+      note: $('#access-note'),
+    },
+    onSheetsChanged: (next, text) => {
+      knownSheets = next || knownSheets;
+      showStatus(`${text} You can close this tab and use the side panel.`, 'success');
+    },
+  });
   await loadAuth();
 }
 
@@ -29,6 +50,14 @@ async function loadAuth() {
   }
 
   const signedIn = !!res?.signedIn;
+  sheetAccess?.applyAuth(res);
+  $('#sheet-step')?.classList.toggle('hidden', !signedIn);
+  if (signedIn) {
+    const list = await sendMessage({ type: 'GET_SHEETS' });
+    knownSheets = list?.sheets || knownSheets;
+  } else if (res?.message || res?.error) {
+    showStatus(res.message || res.error, res.scopeOutdated ? 'info' : 'error');
+  }
   // "published" = the build ships OAuth credentials; otherwise the user must
   // bring their own client (needsSetup stays true until ID + secret are saved).
   const published = !!res?.usingPublishedOAuth && !res?.needsSetup;
@@ -54,16 +83,16 @@ function applyMode(published, needsSetup) {
       'Sign in once so Job Tracker can save applications to your Google Sheets.';
     if (intro) {
       intro.innerHTML =
-        'Job Tracker uses Google sign-in to write rows into <strong>your</strong> spreadsheets. ' +
-        'Use the same Google account that can edit those sheets.' +
+        'Job Tracker saves applications to <strong>your</strong> Google Sheets. ' +
+        'It only accesses sheets it creates or you choose.' +
         (published ? ' No Google Cloud project is required.' : '');
     }
     if (help) {
       help.textContent =
-        'Sign in with the account that can edit your job tracker spreadsheet. Then open Settings and paste a sheet link that account can edit.';
+        'Sign in, then create a tracker sheet or choose one from Google Drive.';
     }
     $('#problems-lede').textContent =
-      'If sign-in fails, match what you see below. For sheet access errors, check Share → Editor on the spreadsheet.';
+      'If sign-in fails, match what you see below.';
     if (advanced) advanced.open = false;
   } else {
     $('#hero-title').textContent = 'First-time Google setup';
@@ -76,7 +105,7 @@ function applyMode(published, needsSetup) {
     }
     if (help) {
       help.textContent =
-        'After you save a Client ID and secret under Advanced, click Sign in with Google. Use an account that can edit your spreadsheet (and is a test user while the Cloud app is in Testing).';
+        'After you save a Client ID and secret under Advanced, click Sign in with Google. Use an account that is a test user while the Cloud app is in Testing.';
     }
     $('#problems-lede').textContent =
       'If something fails, match what you see below. Almost every issue is fixed in Google Cloud settings — not by reinstalling the extension.';
@@ -154,6 +183,17 @@ async function handleSignIn() {
 
 /** Sign out clears local tokens only; access can also be revoked in your Google account. */
 async function handleSignOut() {
+  const btn = $('#sign-out-btn');
+  if (btn?.disabled) return;
+  if (btn) btn.disabled = true;
+  try {
+    await signOut();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function signOut() {
   const res = await sendMessage({ type: 'SIGN_OUT' });
   await loadAuth();
   if (res?.success === false) showStatus(res.error || 'Could not sign out.', 'error');
@@ -187,16 +227,20 @@ function showStatus(msg, type) {
  */
 function sendMessage(msg) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(msg, (res) => {
-      if (chrome.runtime.lastError || res == null) {
-        resolve({
-          success: false,
-          error: chrome.runtime.lastError?.message || 'No response from the extension. Reload this page and try again.',
-        });
-        return;
-      }
-      resolve(res);
-    });
+    const fail = (error) =>
+      resolve({
+        success: false,
+        error: error || 'No response from the extension. Reload this page and try again.',
+      });
+    try {
+      chrome.runtime.sendMessage(msg, (res) => {
+        if (chrome.runtime.lastError || res == null) fail(chrome.runtime.lastError?.message);
+        else resolve(res);
+      });
+    } catch (err) {
+      // e.g. "Extension context invalidated" after the extension was reloaded.
+      fail(err?.message);
+    }
   });
 }
 

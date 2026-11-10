@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Job Tracker — Choose sheets</title>
+  <link rel="icon" href="../icons/icon32.png" type="image/png" />
+  <link rel="stylesheet" href="../lib/tokens.css" />
+  <link rel="stylesheet" href="../lib/ui.css" />
+  <style>
+    body { min-height: 100vh; font-size: 14px; line-height: 1.55; background: linear-gradient(180deg, var(--jt-primary-soft) 0%, transparent 240px), var(--jt-bg); }
+    main { max-width: 32rem; margin: 0 auto; padding: 40px 20px; }
+    .jt-brand { margin-bottom: 20px; }
+    h1 { margin-bottom: 12px; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+    section { background: var(--jt-card); border: 1px solid var(--jt-border); border-radius: var(--jt-radius-lg); padding: 24px; box-shadow: var(--jt-shadow-sm); }
+    p { margin-bottom: 12px; }
+    .note { color: var(--jt-muted); font-size: 13px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn { font-size: 14px; padding: 10px 16px; }
+    .status { margin: 16px 0 0; min-height: 1.5em; padding: 0; border: none; background: none; }
+    .status.ok { color: var(--jt-success-fg); font-weight: 600; }
+    .status.error { color: var(--jt-danger-fg); }
+    footer { margin-top: 20px; font-size: 13px; color: var(--jt-muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="jt-brand">
+        <img src="../icons/logo.png" width="28" height="28" alt="" />
+        <span class="jt-brand-name">Job Tracker</span>
+      </div>
+      <h1>Choose sheets</h1>
+    </header>
+    <section>
+      <p>Choose the Google Sheets you want Job Tracker to use.</p>
+      <p class="note">Job Tracker only gets access to the sheets you choose.</p>
+      <div class="actions">
+        <button id="choose" class="btn btn-primary" type="button" disabled>Choose from Google Drive</button>
+        <button id="retry" class="btn btn-secondary" type="button" hidden>Try again</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </section>
+    <footer><a href="../privacy.html">Privacy policy</a></footer>
+  </main>
+  <script type="module" src="picker.js"></script>
+</body>
+</html>

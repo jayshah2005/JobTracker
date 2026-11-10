@@ -6,20 +6,19 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApxl4PUG9mmRIPbXRkfcyzb/linZkpFGaDmie5a6z4tApJoXNVT9bRWjZOZJZlI5Qd/cPfMu3Yfm7niGjKSZjoflOsMhAHexrZl8OO2OTIq72RjCR1ePvcBNTDSwy2NUlgoVxKhdN2eKBkm/GwGlGokx6Zazi+b6kCoZCZ0Mun+O64WptW7Pe0VR761vM9TkfTPX/0NUGd93XrCDdtyxauxnRBuYewIwl8kiLiHvBAFLH/pgDX+beGk6hpWlLcvpTlO1SIMIUSjijBxxtSA3y973cY2pNpJwTo3hcfl8A8mP+dW+zap8LwjFBUg78jQEG746ZDaBxVIlPv2TSMOZb6QIDAQAB",
   "permissions": [
     "storage",
-    "activeTab",
     "identity",
     "scripting",
-    "sidePanel",
-    "tabs"
+    "sidePanel"
   ],
   "host_permissions": [
     "https://sheets.googleapis.com/*",
-    "https://www.googleapis.com/*",
     "https://accounts.google.com/*",
     "https://oauth2.googleapis.com/*",
-    "https://docs.google.com/*",
     "<all_urls>"
   ],
+  "externally_connectable": {
+    "matches": ["https://jobtracker.jayshah.xyz/*"]
+  },
   "action": {
     "default_icon": {
       "16": "icons/icon16.png",
@@ -72,9 +71,15 @@
     {
       "resources": [
         "content/floating-panel.css",
-        "lib/*.js",
-        "lib/extractors/*.js",
+        "lib/constants.js",
+        "lib/field-mapper.js",
+        "lib/job-extractor.js",
         "lib/job-page-url.js",
+        "lib/job-url.js",
+        "lib/role-likelihood.js",
+        "lib/sheet-config.js",
+        "lib/storage.js",
+        "lib/extractors/*.js",
         "icons/logo.png",
         "icons/icon16.png",
         "icons/icon32.png",

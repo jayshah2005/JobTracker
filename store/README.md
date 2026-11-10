@@ -36,8 +36,8 @@ Store icon: use `icons/icon128.png` (generated from the brand mark).
 1. Bump `version` in `manifest.json` (must increase on every upload) and keep `package.json` on the same version; `npm run pack` refuses to build if they differ.
 2. Complete [`PUBLISHER_OAUTH.md`](PUBLISHER_OAUTH.md) (Cloud project, OAuth client, redirect URI, `.env.oauth`).
 3. Run `npm test` and `npm run pack` (pack injects OAuth from `.env.oauth`).
-4. Host site URLs on GitHub Pages: home `index.html` + `privacy.html` (privacy
-   loads the draft from `LISTING_COPY.md`). Use
+4. Host site URLs on GitHub Pages: home `index.html`, `privacy.html` (privacy
+   loads the draft from `LISTING_COPY.md`) and the Picker at `picker/` (fill `picker/config.js` first; see `PUBLISHER_OAUTH.md` section 6). Use
    https://jobtracker.jayshah.xyz/ and
    https://jobtracker.jayshah.xyz/privacy.html in Store + OAuth Branding.
 5. Copy answers from [`LISTING_COPY.md`](LISTING_COPY.md) into the Privacy practices and Store listing tabs.
@@ -45,7 +45,7 @@ Store icon: use `icons/icon128.png` (generated from the brand mark).
 7. After Chrome assigns a store extension ID, add  
    `https://<STORE_EXTENSION_ID>.chromiumapp.org/`  
    to the OAuth client's Authorized redirect URIs.
-8. Submit OAuth verification when ready for users beyond test accounts.
+8. The `drive.file` scope is non-sensitive, so no sensitive-scope verification or demo video is needed. Complete branding verification if Google asks, then publish the consent screen.
 
 ## Local vs store ID
 

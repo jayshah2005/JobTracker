@@ -33,16 +33,19 @@ If placement is ambiguous, ask the user before inventing a new top-level folder.
 | Layer | Path | Owns | Must not own |
 |-------|------|------|--------------|
 | SW entry | `background/service-worker.js` | Message routing only | Auth flows, Sheets ops, side panel chrome, extraction |
+| Picker bridge | `background/picker-messages.js` | `OPEN_PICKER`, trust check + validation of external `SHEETS_PICKED` | Auth flows; Sheets HTTP |
 | Google session | `background/google-session.js` | OAuth / identity / `withSheetAccess` | Sheets row writes; side panel; DOM |
 | Sheets orchestration | `background/sheets-orchestrator.js` | Add/save/find/schema via `lib/*` + `withSheetAccess` | `chrome.sidePanel`; page DOM |
 | Side panel chrome | `background/side-panel.js` | `chrome.sidePanel`, action click, `SIDE_PANEL_STATE` notify | Auth; Sheets; form UI |
 | Page job data | `background/page-job-data.js` | `GET_TAB_JOB_DATA` (frames + extract) | Sheets; side panel chrome |
 | Domain libs | `lib/*.js` | Auth helpers, Sheets HTTP, storage, extract, map, schema, duplicates | Extension UI markup; page injection chrome |
 | ATS extractors | `lib/extractors/*` | Site-specific pipelines (Greenhouse, Workday, Lever, Ashby, SmartRecruiters, LinkedIn, Indeed); routed by `job-extractor.js` | Sheets; side panel; Chrome messaging |
-| Sidebar UI | `sidepanel/*` | Side panel HTML/CSS/JS, drafts, save form | Direct Sheets HTTP; `setOptions`; `executeScript` extract |
+| Sidebar UI | `sidepanel/*` | Side panel HTML/CSS/JS, drafts, save form; `sheet-access.js` (add-sheet controller shared with Settings) | Direct Sheets HTTP; `setOptions`; `executeScript` extract |
 | Page UI | `content/*` | Job-page detection (`classifyJobUrl` / `isLikelyJobPage`), floating launcher, `GET_PAGE_JOB_DATA` reply; host-page layout fixes in their own scripts (`workday-banner-fix.js`) | `FIND_APPLICATION`; auth; Sheets writes; `sidePanel` API |
+| Hosted Picker | `picker/*` | Static GIS + Google Picker page on GitHub Pages; sends `SHEETS_PICKED` to the extension | Extension code, Sheets writes, secrets |
 | Settings | `options/*` | Settings UI; use `lib/storage` for prefs | Background chrome wiring; raw Sheets HTTP |
 | Connect | `connect/*` | “Set up Google” page: OAuth client setup (Advanced) + sign-in troubleshooting UI | Side panel; job extraction |
+| Design system | `lib/tokens.css`, `lib/ui.css`, `lib/dialog.*` | `--jt-*` tokens (light + dark), shared UI primitives, dialogs | Page-specific layout; the launcher (`content/floating-panel.css` hard-codes light values, sync by hand) |
 | Tests | `tests/*` | Jest coverage for `lib/` | Duplicating production logic |
 
 **Removed:** `popup/` — do not recreate. Toolbar opens the side panel.
@@ -65,9 +68,13 @@ Split duties with **modules imported by that entry**, not a second worker.
 
 **Auth / settings:** `GET_AUTH_STATUS`, `SAVE_OAUTH_CLIENT`, `SIGN_IN`, `SIGN_OUT`, `GET_SETTINGS`, `SAVE_SETTINGS`
 
-**Sheets:** `ADD_SHEET`, `REMOVE_SHEET`, `REFRESH_SHEETS`, `GET_SHEETS`, `SAVE_JOB`, `DELETE_JOB`, `FIND_APPLICATION`, `APPLY_SCHEMA_CHANGE`, `SYNC_TAB_COLUMN_UNIQUES`, `UNDO_SCHEMA_CHANGE`, `REDO_SCHEMA_CHANGE`, `GET_UNDO_STACK`, `RENAME_SHEET_TAB`
+**Sheets:** `CREATE_SHEET`, `OPEN_PICKER`, `ADD_SHEET`, `REMOVE_SHEET`, `REFRESH_SHEETS`, `GET_SHEETS`, `SAVE_JOB`, `DELETE_JOB`, `FIND_APPLICATION`, `APPLY_SCHEMA_CHANGE`, `SYNC_TAB_COLUMN_UNIQUES`, `UNDO_SCHEMA_CHANGE`, `REDO_SCHEMA_CHANGE`, `GET_UNDO_STACK`, `RENAME_SHEET_TAB`
 
 **Page / panel:** `GET_TAB_JOB_DATA`, `PRELOAD_TAB_JOB_DATA`, `CLEAR_TAB_JOB_PRELOAD`, `GET_PAGE_JOB_DATA` (content reply), `OPEN_SIDE_PANEL`, `CLOSE_SIDE_PANEL`, `SIDE_PANEL_UNLOADED`, `SIDE_PANEL_STATE` (to content)
+
+**Broadcast:** `SHEETS_UPDATED` (service worker to open UI pages, best effort, after a pick adds sheets)
+
+**External (from the hosted Picker page, `onMessageExternal`, origin `https://jobtracker.jayshah.xyz` only):** `SHEETS_PICKED` `{files:[{id,name}]}`. `GET_AUTH_STATUS` also returns `pickerAvailable` and, for old-scope sessions, `scopeOutdated`. `SAVE_JOB` / `DELETE_JOB` accept `expectedFingerprint` and fail with `code: 'ROW_CHANGED'` when the row differs. The hosted Picker lives in `picker/` (static; pure helpers in `picker/helpers.js`); it must not call extension code except via this message.
 
 Do not reintroduce orphan types (`GET_OAUTH_SETUP`, `UPDATE_TAB_MAPPINGS`, `TOGGLE_PANEL`, `HIDE_PANEL`) without wiring callers.
 

@@ -12,7 +12,7 @@ import {
   exchangeCodeForToken,
   refreshAccessToken,
 } from '../lib/google-auth.js';
-import { SHEETS_SCOPE } from '../lib/oauth-config.js';
+import { DRIVE_FILE_SCOPE } from '../lib/oauth-config.js';
 
 describe('sheetsAccessError', () => {
   test('points people to in-extension Google setup', () => {
@@ -93,7 +93,7 @@ describe('buildGoogleAuthUrl', () => {
     expect(parsed.searchParams.get('code_challenge_method')).toBe('S256');
     expect(parsed.searchParams.get('code_challenge')).toBe('challenge123');
     expect(parsed.searchParams.get('redirect_uri')).toBe(redirectUri);
-    expect(parsed.searchParams.get('scope')).toBe(SHEETS_SCOPE);
+    expect(parsed.searchParams.get('scope')).toBe(DRIVE_FILE_SCOPE);
     expect(parsed.searchParams.get('include_granted_scopes')).toBeNull();
     expect(parsed.searchParams.get('access_type')).toBe('offline');
     expect(parsed.searchParams.get('prompt')).toBe('select_account consent');
@@ -113,7 +113,7 @@ describe('buildGoogleAuthUrl', () => {
 describe('parseOAuthRedirect', () => {
   test('reads authorization code from the query string', () => {
     const result = parseOAuthRedirect(
-      'https://ext.chromiumapp.org/?code=4/0Axxx&scope=https://www.googleapis.com/auth/spreadsheets'
+      'https://ext.chromiumapp.org/?code=4/0Axxx&scope=https://www.googleapis.com/auth/drive.file'
     );
     expect(result.ok).toBe(true);
     expect(result.code).toBe('4/0Axxx');

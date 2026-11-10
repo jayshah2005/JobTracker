@@ -196,4 +196,21 @@ describe('initial destination choice', () => {
     expect(chooseInitialDestinationIndex(dests, { draftKey: 'X:1', defaultKey: 'Y:1' })).toBe(0);
     expect(chooseInitialDestinationIndex([], { defaultKey: 'B:3' })).toBe(0);
   });
+  test('tabs of needs-access sheets are skipped when a working tab exists', () => {
+    const d = [
+      { sheetId: 'A', gid: '1', needsAccess: true },
+      { sheetId: 'B', gid: '3', needsAccess: false },
+    ];
+    expect(chooseInitialDestinationIndex(d, {})).toBe(1);
+    expect(chooseInitialDestinationIndex(d, { draftKey: 'A:1', defaultKey: 'A:1' })).toBe(1);
+    const all = [{ sheetId: 'A', gid: '1', needsAccess: true }];
+    expect(chooseInitialDestinationIndex(all, { defaultKey: 'A:1' })).toBe(0);
+  });
+  test('getAllDestinations carries the needsAccess flag', () => {
+    const out = getAllDestinations([
+      { spreadsheetId: 'A', name: 'a', needsAccess: true, tabs: [{ tabName: 't', gid: 1 }] },
+      { spreadsheetId: 'B', name: 'b', tabs: [{ tabName: 't', gid: 2 }] },
+    ]);
+    expect(out.map((x) => x.needsAccess)).toEqual([true, false]);
+  });
 });

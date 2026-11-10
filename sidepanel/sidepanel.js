@@ -6,7 +6,8 @@
  * also used to edit an already-saved row) and applied (post-save confirmation).
  * All Google/Sheets work happens in the service worker; this file only sends
  * chrome.runtime messages (GET_AUTH_STATUS, GET_SHEETS, REFRESH_SHEETS,
- * ADD_SHEET, FIND_APPLICATION, SAVE_JOB, DELETE_JOB, APPLY_SCHEMA_CHANGE,
+ * ADD_SHEET, CREATE_SHEET, OPEN_PICKER (via sheet-access.js), FIND_APPLICATION,
+ * SAVE_JOB, DELETE_JOB (both may answer code ROW_CHANGED), APPLY_SCHEMA_CHANGE,
  * GET_TAB_JOB_DATA, SIGN_IN, CLOSE_SIDE_PANEL, SIDE_PANEL_UNLOADED).
  *
  * Loading is staged so the form never waits on the sheet search: cached
@@ -42,6 +43,15 @@ import {
 import { urlsMatch } from '../lib/job-url.js';
 import { getSettings, saveSettings } from '../lib/storage.js';
 import { SCHEMA_OPS } from '../lib/schema-editor.js';
+import {
+  createSheetAccess,
+  sheetsNeedingAccess,
+  applyAccessFlags,
+  sheetsWereRemoved,
+  NEEDS_ACCESS_LABEL,
+  NEEDS_ACCESS_HINT_NO_PICKER,
+  PICKER_WAIT_HINT,
+} from './sheet-access.js';
 import { confirmDialog } from '../lib/dialog.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -99,6 +109,9 @@ async function collapseSidePanel() {
 // Init & tab binding
 // ---------------------------------------------------------------------------
 
+/** Add-sheet controller (create / choose / grant access); set in init(). */
+let sheetAccess = null;
+
 async function init() {
   boundTabId = await resolveBoundTabId();
   window.addEventListener('pagehide', () => {
@@ -118,9 +131,25 @@ async function init() {
   $('#retry-btn').addEventListener('click', () => loadData({ restoreDraft: true }));
   $('#sign-in-btn').addEventListener('click', handleSignIn);
   $('#open-connect-btn').addEventListener('click', openConnectPage);
-  $('#open-connect-help').addEventListener('click', (e) => {
-    e.preventDefault();
-    openConnectPage();
+  sheetAccess = createSheetAccess({
+    sendMessage,
+    showStatus,
+    getSheets: () => sheets,
+    onAccessChanged: (next) => {
+      sheets = applyAccessFlags(sheets, next);
+      renderNeedsAccess();
+    },
+    els: {
+      create: $('#create-sheet-btn'),
+      choose: $('#choose-sheet-btn'),
+      grant: $('#grant-sheet-btn'),
+      hint: $('#picker-hint'),
+      note: $('#access-note'),
+    },
+    onSheetsChanged: async (_next, text) => {
+      await loadData();
+      showStatus(text || 'Sheet added. You can now save jobs to it.', 'success');
+    },
   });
   $('#add-sheet-btn').addEventListener('click', handleAddSheet);
   $('#setup-sheet-url').addEventListener('keydown', (e) => {
@@ -146,8 +175,17 @@ async function init() {
   chrome.tabs.onUpdated.addListener(onBoundTabUpdated);
   chrome.tabs.onRemoved.addListener((tabId) => {
     if (tabId === boundTabId) {
+      if (refreshTimer) clearTimeout(refreshTimer);
       chrome.storage.session?.remove?.(draftKey(tabId));
     }
+  });
+  // A sheet disconnected in Settings (or a disconnect that signs out) must not
+  // stay selectable here: saving to it would fail.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.configuredSheets) return;
+    if (!sheetsWereRemoved(sheets, changes.configuredSheets.newValue)) return;
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => loadData({ restoreDraft: true, quiet: true }), 200);
   });
 
   await loadData({ restoreDraft: true });
@@ -175,6 +213,16 @@ async function onBoundTabUpdated(tabId, changeInfo, tab) {
   if (nextUrl && nextUrl === boundTabUrl && changeInfo.status !== 'complete') {
     return;
   }
+  // Same posting, and the panel shows the saved confirmation or the user's
+  // in-progress form: a reload would re-render the fields and drop focus.
+  if (
+    boundTabUrl &&
+    urlsMatch(boundTabUrl, nextUrl) &&
+    (!$('#applied-view').classList.contains('hidden') ||
+      (isSaveViewVisible() && userInteracted))
+  ) {
+    return;
+  }
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     loadData({ restoreDraft: true, quiet: true });
@@ -188,22 +236,37 @@ async function onBoundTabUpdated(tabId, changeInfo, tab) {
 async function saveDraft() {
   if (!boundTabId || !chrome.storage?.session) return;
   collectFieldValues();
-  await chrome.storage.session.set({
-    [draftKey(boundTabId)]: {
-      pageUrl: boundTabUrl,
-      userInputs: { ...userInputs },
-      destinationKey: selectedDestination
-        ? `${selectedDestination.sheetId}:${selectedDestination.gid}`
-        : null,
-      savedAt: Date.now(),
-    },
-  });
+  try {
+    await chrome.storage.session.set({
+      [draftKey(boundTabId)]: {
+        pageUrl: boundTabUrl,
+        userInputs: { ...userInputs },
+        destinationKey: selectedDestination ? destinationKey(selectedDestination) : null,
+        savedAt: Date.now(),
+      },
+    });
+  } catch {
+    /* drafts are best-effort; never block saving or loading on them */
+  }
+}
+
+async function clearDraft() {
+  if (!boundTabId || !chrome.storage?.session) return;
+  try {
+    await chrome.storage.session.remove(draftKey(boundTabId));
+  } catch {
+    /* best-effort */
+  }
 }
 
 async function loadDraft() {
   if (!boundTabId || !chrome.storage?.session) return null;
-  const data = await chrome.storage.session.get(draftKey(boundTabId));
-  return data[draftKey(boundTabId)] || null;
+  try {
+    const data = await chrome.storage.session.get(draftKey(boundTabId));
+    return data[draftKey(boundTabId)] || null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -218,9 +281,11 @@ async function loadDraft() {
  *   refresh after tab navigation (no loading spinner, uses cached sheets).
  */
 async function loadData(opts = {}) {
+  const token = loadToken + 1; // loadDataInner takes this token synchronously
   try {
     await loadDataInner(opts);
   } catch (err) {
+    if (token !== loadToken) return; // a newer load owns the view now
     if (opts.quiet) {
       showStatus(err.message || 'Could not refresh job details.', 'error');
     } else {
@@ -251,11 +316,15 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
   boundTabUrl = tab?.url || '';
   // Form values belong to one posting; a new job in the same tab starts fresh.
   const samePage = !previousUrl || urlsMatch(previousUrl, boundTabUrl);
-  if (!samePage) userInteracted = false;
+  if (!samePage) {
+    userInteracted = false;
+    clearStatus(); // the old posting's "Saved" / error message does not apply here
+  }
 
   const signedIn = !!authRes?.signedIn;
   const needsSetup = !!authRes?.needsSetup;
   $('#auth-pill').classList.toggle('hidden', !signedIn);
+  sheetAccess?.applyAuth(authRes);
 
   if (!signedIn) {
     showView('signin');
@@ -266,7 +335,7 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
     connectBtn.textContent = needsSetup ? 'Set up Google' : 'Sign-in help';
     $('#signin-copy').textContent = needsSetup
       ? 'First-time setup opens in a full page. Follow the steps there, then come back to sign in.'
-      : 'Sign in with Google once. That account is used for every spreadsheet you add.';
+      : authRes?.message || authRes?.error || 'Sign in with Google once. Job Tracker only accesses sheets it creates or you choose.';
     return;
   }
 
@@ -287,11 +356,13 @@ async function loadDataInner({ restoreDraft = false, quiet = false } = {}) {
     const live = await sendMessage({ type: 'REFRESH_SHEETS' });
     if (token !== loadToken) return;
     if (live?.success) sheetsRes = live;
+    else if (live?.error) showStatus(live.error, 'error');
     refreshInBackground = false;
   }
 
   sheets = sheetsRes?.sheets || [];
   destinations = getAllDestinations(sheets);
+  renderNeedsAccess();
 
   if (sheets.length === 0) {
     showView('setup');
@@ -383,6 +454,7 @@ async function refreshSheetsInBackground(token) {
   const prevMappings = JSON.stringify(selectedDestination?.mappings || []);
   sheets = res.sheets;
   destinations = getAllDestinations(sheets);
+  renderNeedsAccess();
   if (sheets.length === 0) {
     showView('setup');
     return;
@@ -458,7 +530,49 @@ function openConnectPage() {
   chrome.tabs.create({ url: chrome.runtime.getURL('connect/connect.html') });
 }
 
+/** Banner listing sheets Job Tracker lost access to, with a Grant access button each. */
+function renderNeedsAccess() {
+  const box = $('#needs-access');
+  if (!box) return;
+  const list = sheetsNeedingAccess(sheets);
+  box.textContent = '';
+  box.classList.toggle('hidden', list.length === 0);
+  const canGrant = sheetAccess?.isPickerOk() !== false;
+  for (const sheet of list) {
+    const row = document.createElement('div');
+    row.className = 'needs-access-row';
+    const text = document.createElement('p');
+    text.className = 'needs-access-text';
+    const strong = document.createElement('strong');
+    strong.textContent = NEEDS_ACCESS_LABEL;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'needs-access-name';
+    nameEl.title = sheet.name || 'Untitled sheet';
+    nameEl.textContent = sheet.name || 'Untitled sheet';
+    text.append(strong, nameEl);
+    row.appendChild(text);
+    if (canGrant) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary needs-access-btn';
+      btn.textContent = 'Grant access';
+      btn.setAttribute('aria-label', `Grant access to ${sheet.name || 'Untitled sheet'}`);
+      btn.addEventListener('click', async () => {
+        if (await sheetAccess.openPicker(btn, sheet.spreadsheetId)) showStatus(PICKER_WAIT_HINT, 'info');
+      });
+      row.appendChild(btn);
+    } else {
+      const hint = document.createElement('p');
+      hint.className = 'field-hint';
+      hint.textContent = NEEDS_ACCESS_HINT_NO_PICKER;
+      row.appendChild(hint);
+    }
+    box.appendChild(row);
+  }
+}
+
 async function handleAddSheet() {
+  if ($('#add-sheet-btn').disabled) return; // Enter pressed while a request is running
   const url = $('#setup-sheet-url').value.trim();
   if (!url) {
     showStatus('Paste a Google Sheets link first.', 'error');
@@ -472,11 +586,10 @@ async function handleAddSheet() {
 
   try {
     const res = await sendMessage({ type: 'ADD_SHEET', url });
-    if (res.success) {
+    if (sheetAccess.handleAddResult(res)) {
+      $('#setup-sheet-url').value = '';
       await loadData();
       showStatus('Sheet added. You can now save jobs to it.', 'success');
-    } else {
-      showStatus(res.error || 'Could not add that sheet. Check the link and that your Google account can edit it.', 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
@@ -492,7 +605,7 @@ async function handleAddSheet() {
 
 function destinationLabel(d) {
   if (!d) return '';
-  return `${d.sheetName || 'Spreadsheet'} → ${d.tabName || 'Sheet'}`;
+  return `${d.sheetName || 'Untitled sheet'} → ${d.tabName || 'Sheet'}`;
 }
 
 /** Reflect `idx` in the picker input and the "Make default" control. */
@@ -645,6 +758,7 @@ function bindDestinationCombo() {
     menu.innerHTML = items
       .map(({ i, label }) => {
         const selected = i === selectedIdx ? ' is-selected' : '';
+        if (destinations[i]?.needsAccess) label = `${label} (needs access)`;
         return `
           <li class="combo-item${selected}" role="option">
             <button type="button" class="combo-pick" data-pick="${i}">${escapeHtml(label)}</button>
@@ -1451,9 +1565,19 @@ function onFieldChange(e) {
 // Save / update / delete
 // ---------------------------------------------------------------------------
 
+let saving = false;
+
 async function handleSave() {
+  if (saving || deleting) return;
   if (!selectedDestination) {
     showStatus('Choose a destination sheet before saving.', 'error');
+    return;
+  }
+  if (selectedDestination.needsAccess) {
+    showStatus(
+      'Job Tracker needs access to that sheet. Use Grant access above, or pick another destination.',
+      'error'
+    );
     return;
   }
   clearStatus();
@@ -1465,26 +1589,51 @@ async function handleSave() {
     isEditingExisting() &&
     (!existingMatch?.matched ||
       destinationMatches(existingMatch, selectedDestination));
+  saving = true;
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
   btn.innerHTML = `<span class="spinner"></span>${editing ? 'Updating…' : 'Saving…'}`;
 
+  // Everything below must use what was on screen when Save was clicked: the
+  // user can switch destination or the tab can navigate while we wait.
+  const dest = selectedDestination;
+  const tokenAtStart = loadToken;
+  const sentExtracted = extractedData;
   collectFieldValues();
-  await saveDraft();
+  const payload = {
+    type: 'SAVE_JOB',
+    spreadsheetId: dest.sheetId,
+    tabId: dest.gid,
+    extractedData: sentExtracted,
+    userInputs: { ...userInputs },
+  };
+  if (editing) {
+    payload.existingRowIndex = Number(editingRowIndex);
+    if (existingMatch?.rowFingerprint != null) {
+      payload.expectedFingerprint = existingMatch.rowFingerprint;
+    }
+  }
 
   try {
-    const payload = {
-      type: 'SAVE_JOB',
-      spreadsheetId: selectedDestination.sheetId,
-      tabId: selectedDestination.gid,
-      extractedData,
-      userInputs,
-    };
-    if (editing) {
-      payload.existingRowIndex = Number(editingRowIndex);
-    }
+    await saveDraft();
 
     const res = await sendMessage(payload);
+
+    if (
+      tokenAtStart !== loadToken ||
+      destinationKey(selectedDestination) !== destinationKey(dest)
+    ) {
+      // The panel moved to another job/destination while saving; don't paint this result over it.
+      if (res.success) {
+        await clearDraft();
+        showStatus(res.updated ? 'Updated in your tracker.' : 'Saved to your tracker.', 'success');
+      } else if (res.alreadyApplied) {
+        showStatus(res.error || 'That job is already in the sheet you saved to.', 'info');
+      } else if (res.code !== 'ROW_CHANGED') {
+        showStatus(res.error || 'Could not save to your sheet. Please try again.', 'error');
+      }
+      return;
+    }
 
     if (res.alreadyApplied && res.match) {
       // Duplicate only for this destination — open that row for edit.
@@ -1499,35 +1648,35 @@ async function handleSave() {
     }
 
     if (res.success) {
-      if (boundTabId && chrome.storage?.session) {
-        await chrome.storage.session.remove(draftKey(boundTabId));
-      }
+      await clearDraft();
 
-      const statusCol = selectedDestination.mappings?.find((m) =>
+      const statusCol = dest.mappings?.find((m) =>
         /application status/i.test(m.header || '')
       )?.columnIndex;
       const statusValue =
         (statusCol != null &&
-          (userInputs[`dropdown_${statusCol}`] || userInputs[`col_${statusCol}`])) ||
+          (payload.userInputs[`dropdown_${statusCol}`] ||
+            payload.userInputs[`col_${statusCol}`])) ||
         '';
 
       if (res.updated) {
         editingRowIndex = res.rowIndex;
         existingMatch = {
           matched: true,
-          role: extractedData.role,
-          company: extractedData.company,
+          role: sentExtracted.role,
+          company: sentExtracted.company,
           dateApplied: existingMatch?.dateApplied || '',
           status: statusValue || existingMatch?.status || '',
-          tabName: selectedDestination.tabName,
-          sheetName: selectedDestination.sheetName,
-          spreadsheetId: selectedDestination.sheetId,
-          gid: selectedDestination.gid,
+          tabName: dest.tabName,
+          sheetName: dest.sheetName,
+          spreadsheetId: dest.sheetId,
+          gid: dest.gid,
           rowIndex: res.rowIndex,
           row: res.row,
+          rowFingerprint: res.rowFingerprint ?? null,
         };
         userInputs = rowToFormInputs(
-          selectedDestination.mappings || [],
+          dest.mappings || [],
           res.row || []
         );
         renderEditChrome();
@@ -1540,32 +1689,44 @@ async function handleSave() {
             : null;
         existingMatch = {
           matched: true,
-          role: extractedData.role,
-          company: extractedData.company,
+          role: sentExtracted.role,
+          company: sentExtracted.company,
           dateApplied: formatDate(),
           status: statusValue,
-          tabName: selectedDestination.tabName,
-          sheetName: selectedDestination.sheetName,
-          spreadsheetId: selectedDestination.sheetId,
-          gid: selectedDestination.gid,
+          tabName: dest.tabName,
+          sheetName: dest.sheetName,
+          spreadsheetId: dest.sheetId,
+          gid: dest.gid,
           rowIndex: savedRowIndex,
           row: res.row,
+          rowFingerprint: res.rowFingerprint ?? null,
         };
         editingRowIndex = null;
         renderApplied();
         showView('applied');
         showStatus('Saved to your tracker.', 'success');
       }
+    } else if (res.code === 'ROW_CHANGED') {
+      await reloadAfterRowChanged(res.error);
     } else {
       showStatus(res.error || 'Could not save to your sheet. Please try again.', 'error');
     }
   } catch (err) {
     showStatus(err.message, 'error');
   } finally {
+    saving = false;
     btn.disabled = false;
     btn.removeAttribute('aria-busy');
     restoreSaveButton();
   }
+}
+
+/** The sheet row moved or changed under us: drop stale row state and re-find the job. */
+async function reloadAfterRowChanged(message) {
+  existingMatch = null;
+  editingRowIndex = null;
+  await loadData({ restoreDraft: true });
+  showStatus(message || 'This row changed in Google Sheets. Reopen Job Tracker on this page to reload it.', 'error');
 }
 
 /** Reset the Save button markup after the spinner state. */
@@ -1583,18 +1744,22 @@ function restoreSaveButton() {
   `;
 }
 
+let deleting = false;
+
 /** Delete the saved row (from the applied banner or the edit form) after confirmation. */
 async function handleDeleteExisting() {
+  if (deleting || saving) return;
   const editing = isEditingExisting();
+  // The matched row's own sheet/tab, never the picker: the user may have
+  // selected another destination, and a row index only means something in its sheet.
   const spreadsheetId =
-    (editing && selectedDestination?.sheetId) || existingMatch?.spreadsheetId;
+    existingMatch?.spreadsheetId || (editing ? selectedDestination?.sheetId : undefined);
   const tabId =
-    (editing && selectedDestination?.gid) ??
     existingMatch?.gid ??
-    existingMatch?.tabId;
-  const rowIndex = editing
-    ? Number(editingRowIndex)
-    : Number(existingMatch?.rowIndex);
+    existingMatch?.tabId ??
+    (editing ? selectedDestination?.gid : undefined);
+  const rawIndex = editing ? editingRowIndex : existingMatch?.rowIndex;
+  const rowIndex = rawIndex == null || rawIndex === '' ? NaN : Number(rawIndex);
 
   if (!spreadsheetId || tabId == null || !Number.isFinite(rowIndex) || rowIndex < 0) {
     showStatus('Could not find that saved row to delete. Reopen the side panel and try again.', 'error');
@@ -1605,15 +1770,21 @@ async function handleDeleteExisting() {
     return;
   }
 
+  deleting = true; // also blocks a second dialog from a double click
   const role = existingMatch?.role || extractedData.role || 'this application';
   const company = existingMatch?.company || extractedData.company || '';
   const label = company ? `${role} at ${company}` : role;
-  const confirmed = await confirmDialog({
-    title: 'Delete this application?',
-    message: `Removes “${label}” from your Google Sheet. This cannot be undone here; try the sheet’s version history.`,
-    confirmLabel: 'Delete row',
-    danger: true,
-  });
+  let confirmed = false;
+  try {
+    confirmed = await confirmDialog({
+      title: 'Delete this application?',
+      message: `Removes “${label}” from your Google Sheet. This cannot be undone here; try the sheet’s version history.`,
+      confirmLabel: 'Delete row',
+      danger: true,
+    });
+  } finally {
+    if (!confirmed) deleting = false;
+  }
   if (!confirmed) return;
 
   const appliedBtn = $('#delete-existing-btn');
@@ -1631,8 +1802,13 @@ async function handleDeleteExisting() {
       spreadsheetId,
       tabId,
       rowIndex,
+      expectedFingerprint: existingMatch?.rowFingerprint ?? undefined,
     });
 
+    if (res?.code === 'ROW_CHANGED') {
+      await reloadAfterRowChanged(res.error);
+      return;
+    }
     if (!res?.success) {
       showStatus(res?.error || 'Could not delete that application.', 'error');
       return;
@@ -1641,15 +1817,14 @@ async function handleDeleteExisting() {
     existingMatch = null;
     editingRowIndex = null;
     userInputs = {};
-    if (boundTabId && chrome.storage?.session) {
-      await chrome.storage.session.remove(draftKey(boundTabId));
-    }
+    await clearDraft();
 
     await loadData({ restoreDraft: false });
     showStatus('Removed from your tracker.', 'success');
   } catch (err) {
     showStatus(err.message || 'Could not delete that application.', 'error');
   } finally {
+    deleting = false;
     if (appliedBtn) {
       appliedBtn.disabled = false;
       appliedBtn.textContent = 'Delete from tracker';
@@ -1708,18 +1883,23 @@ function clearStatus() {
  */
 function sendMessage(msg) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(msg, (res) => {
-      if (chrome.runtime.lastError || res == null) {
-        resolve({
-          success: false,
-          error:
-            chrome.runtime.lastError?.message ||
-            'No response from the extension. Reload the side panel and try again.',
-        });
-        return;
-      }
-      resolve(res);
-    });
+    const fail = (error) =>
+      resolve({
+        success: false,
+        error: error || 'No response from the extension. Reload the side panel and try again.',
+      });
+    try {
+      chrome.runtime.sendMessage(msg, (res) => {
+        if (chrome.runtime.lastError || res == null) {
+          fail(chrome.runtime.lastError?.message);
+          return;
+        }
+        resolve(res);
+      });
+    } catch (err) {
+      // e.g. "Extension context invalidated" after the extension was reloaded.
+      fail(err?.message);
+    }
   });
 }
 
@@ -1747,4 +1927,9 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-init();
+init().catch((err) => {
+  // e.g. extension reloaded under an open panel: never leave the spinner up.
+  const text = $('#error-view-text');
+  if (text) text.textContent = err?.message || 'Could not start Job Tracker. Reload the side panel.';
+  showView('error');
+});

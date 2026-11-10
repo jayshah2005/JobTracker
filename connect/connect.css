@@ -1,61 +1,24 @@
-:root {
-  --jt-primary: #4f46e5;
-  --jt-primary-hover: #4338ca;
-  --jt-success: #059669;
-  --jt-danger: #dc2626;
-  --jt-text: #1e293b;
-  --jt-muted: #64748b;
-  --jt-border: #dbe3ee;
-  --jt-card: #ffffff;
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
+/* Connect page: setup walkthrough. Tokens: ../lib/tokens.css; shared primitives: ../lib/ui.css. */
 body {
   min-height: 100vh;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: var(--jt-text);
-  background:
-    linear-gradient(180deg, rgba(79, 70, 229, 0.08) 0%, transparent 28%),
-    #f4f6fb;
+  background: linear-gradient(180deg, var(--jt-primary-soft) 0%, transparent 240px), var(--jt-bg);
 }
 
 .hero {
-  padding: 64px 24px 40px;
+  padding: 40px 24px 56px;
   text-align: center;
-  background: linear-gradient(135deg, #6b5ea8, #8b7bc4);
-  color: #fff;
+  background: var(--jt-card);
+  border-bottom: 1px solid var(--jt-border);
   animation: fade-in 0.45s ease both;
 }
 
-.brand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0.95;
-  margin-bottom: 14px;
-}
-
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  object-fit: cover;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.18);
+.hero .jt-brand {
+  margin-bottom: 20px;
 }
 
 h1 {
-  font-size: clamp(32px, 5vw, 44px);
-  font-weight: 650;
+  font-size: clamp(28px, 5vw, 36px);
+  font-weight: 700;
   letter-spacing: -0.03em;
   margin-bottom: 12px;
 }
@@ -65,19 +28,26 @@ h1 {
   margin: 0 auto;
   font-size: 16px;
   line-height: 1.5;
-  opacity: 0.9;
+  color: var(--jt-muted);
 }
 
 .wrap {
   width: min(720px, calc(100% - 40px));
-  margin: -20px auto 72px;
+  margin: 24px auto 72px;
   position: relative;
+}
+
+.step,
+.intro,
+.problems {
+  border-radius: var(--jt-radius-lg);
 }
 
 .steps {
   list-style: none;
   counter-reset: setup;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -96,6 +66,7 @@ h1 {
 .step:nth-child(5) { animation-delay: 0.33s; }
 
 .step::before {
+  border-radius: var(--jt-radius);
   counter-increment: setup;
   content: counter(setup);
   position: absolute;
@@ -107,8 +78,8 @@ h1 {
   place-items: center;
   font-size: 13px;
   font-weight: 700;
-  color: var(--jt-primary);
-  background: #eef2ff;
+  color: var(--jt-primary-text);
+  background: var(--jt-primary-soft);
 }
 
 .step h2 {
@@ -126,7 +97,7 @@ h1 {
 
 .step p a,
 .how a {
-  color: var(--jt-primary);
+  color: var(--jt-primary-text);
 }
 
 .how {
@@ -140,10 +111,17 @@ h1 {
   margin-bottom: 10px;
 }
 
+.how code,
+.uri-row code {
+  font-family: var(--jt-font-mono);
+  border-radius: var(--jt-radius-sm);
+}
+
 .how code {
   font-size: 13px;
-  background: #f1f5f9;
+  background: var(--jt-sunken);
   padding: 1px 5px;
+  overflow-wrap: anywhere;
 }
 
 .uri-label {
@@ -159,29 +137,18 @@ h1 {
 }
 
 label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
+  margin: 4px 0 6px;
+  font-size: var(--jt-text-sm);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--jt-muted);
-  margin: 4px 0 6px;
 }
 
 input[type='text'],
 input[type='password'] {
-  width: 100%;
   padding: 11px 12px;
-  border: 1px solid var(--jt-border);
-  background: #fff;
   font-size: 15px;
   margin-bottom: 12px;
-  font-family: inherit;
-}
-
-input:focus {
-  outline: 2px solid var(--jt-primary);
-  outline-offset: 1px;
 }
 
 .uri-row {
@@ -194,47 +161,17 @@ input:focus {
 .uri-row code {
   flex: 1;
   padding: 12px 14px;
-  background: #f1f5f9;
+  background: var(--jt-sunken);
   font-size: 13px;
-  word-break: break-all;
+  min-width: 0;
+  overflow-wrap: anywhere;
   line-height: 1.45;
 }
 
+/* Connect is a full page: buttons and status banners run one size up from the side panel. */
 .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   padding: 10px 16px;
-  border: none;
   font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
-  font-family: inherit;
-}
-
-.btn-primary {
-  background: var(--jt-primary);
-  color: #fff;
-}
-
-.btn-primary:hover {
-  background: var(--jt-primary-hover);
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: #fff;
-  color: var(--jt-text);
-  border: 1px solid var(--jt-border);
-}
-
-.btn-secondary:hover {
-  background: #f8fafc;
 }
 
 .status {
@@ -244,37 +181,11 @@ input:focus {
   animation: rise 0.3s ease both;
 }
 
-.status-success {
-  background: #ecfdf5;
-  color: var(--jt-success);
-}
-
-.status-error {
-  background: #fef2f2;
-  color: var(--jt-danger);
-}
-
-.hidden {
-  display: none !important;
-}
-
-.status-info {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-button:focus-visible,
-a:focus-visible,
-summary:focus-visible {
-  outline: 2px solid var(--jt-primary);
-  outline-offset: 2px;
-}
-
 .advanced {
   margin: 20px 0 8px;
   background: var(--jt-card);
   border: 1px solid var(--jt-border);
-  border-radius: 10px;
+  border-radius: var(--jt-radius-lg);
   overflow: hidden;
 }
 
@@ -284,7 +195,7 @@ summary:focus-visible {
   font-weight: 650;
   font-size: 14px;
   padding: 14px 18px;
-  background: #f8fafc;
+  background: var(--jt-sunken);
   border-bottom: 1px solid transparent;
   user-select: none;
 }
@@ -331,7 +242,7 @@ summary:focus-visible {
 }
 
 .connected {
-  color: var(--jt-success) !important;
+  color: var(--jt-success-fg) !important;
   font-weight: 600;
 }
 
@@ -393,7 +304,7 @@ summary:focus-visible {
   content: '+';
   display: inline-block;
   width: 1.1em;
-  color: var(--jt-primary);
+  color: var(--jt-primary-text);
   font-weight: 700;
 }
 
@@ -418,7 +329,7 @@ summary:focus-visible {
 }
 
 .problem-body a {
-  color: var(--jt-primary);
+  color: var(--jt-primary-text);
 }
 
 .problem-body strong {
@@ -451,6 +362,7 @@ summary:focus-visible {
   }
 
   .step::before {
+  border-radius: var(--jt-radius);
     left: 16px;
     top: 22px;
   }
@@ -458,4 +370,27 @@ summary:focus-visible {
   .uri-row {
     flex-direction: column;
   }
+}
+
+.step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .step-actions {
+    flex-direction: column;
+  }
+
+  .step-actions .btn {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+
+.step::before {
+  border-radius: var(--jt-radius);
 }
